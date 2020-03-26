@@ -70,6 +70,8 @@ spec:
     tag: 8.1.1
 ```
 
+There are many examples of SolrCloud objects using different types of configuration options provided in the `/example` directory.
+
 Apply it to your Kubernetes cluster.
 
 ```bash
