@@ -1,0 +1,50 @@
+apiVersion: solr.bloomberg.com/v1beta1
+kind: SolrCloud
+metadata:
+  name: example-kube-options
+spec:
+  replicas: 3
+  solrImage:
+    tag: 8.2.0
+  customSolrKubeOptions:
+    podOptions:
+      resources:
+        limits:
+          memory: "1G"
+        requests:
+          cpu: "65m"
+          memory: "156Mi"
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"
+    statefulSetOptions:
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"
+    commonServiceOptions:
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"
+    headlessServiceOptions:
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"
+    nodeServiceOptions:
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"
+    ingressOptions:
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"
+    configMapOptions:
+      labels:
+        "testL": "value"
+      annotations:
+        "testA": "value"

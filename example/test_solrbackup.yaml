@@ -1,4 +1,33 @@
 apiVersion: solr.bloomberg.com/v1beta1
+kind: SolrCloud
+metadata:
+  name: example
+spec:
+  dataPvcSpec:
+    resources:
+      requests:
+        storage: "5Gi"
+  backupRestoreVolume:
+    persistentVolumeClaim:
+      claimName: "pvc-test"
+
+---
+apiVersion: solr.bloomberg.com/v1beta1
+kind: SolrCollection
+metadata:
+  name: example-collection-1
+spec:
+  solrCloud: example
+  collection: col1
+  routerName: compositeId
+  autoAddReplicas: true
+  numShards: 2
+  replicationFactor: 1
+  maxShardsPerNode: 1
+  collectionConfigName: "_default"
+
+---
+apiVersion: solr.bloomberg.com/v1beta1
 kind: SolrBackup
 metadata:
   name: solrbackup-test
@@ -11,4 +40,4 @@ spec:
           claimName: "pvc-test"
   solrCloud: example
   collections:
-    - example
+    - col1

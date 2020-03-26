@@ -1,19 +1,13 @@
 apiVersion: solr.bloomberg.com/v1beta1
 kind: SolrCloud
 metadata:
-  name: example
+  name: example-zk-options
 spec:
-  dataPvcSpec:
-    resources:
-      requests:
-        storage: "5Gi"
   replicas: 3
   solrImage:
     tag: 8.2.0
-  solrJavaMem: "-Xms1g -Xmx3g"
   zookeeperRef:
     provided:
-      chroot: "/this/will/be/auto/created"
       zookeeper:
         persistence:
           spec:
@@ -29,5 +23,3 @@ spec:
             requests:
               cpu: "65m"
               memory: "156Mi"
-  solrOpts: "-Dsolr.autoSoftCommit.maxTime=10000"
-  solrGCTune: "-XX:SurvivorRatio=4 -XX:TargetSurvivorRatio=90 -XX:MaxTenuringThreshold=8"

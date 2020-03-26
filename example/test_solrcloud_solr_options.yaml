@@ -1,0 +1,11 @@
+apiVersion: solr.bloomberg.com/v1beta1
+kind: SolrCloud
+metadata:
+  name: example-solr-options
+spec:
+  replicas: 3
+  solrImage:
+    tag: 8.2.0
+  solrOpts: "-Dsolr.autoSoftCommit.maxTime=10000"
+  solrGCTune: "-XX:SurvivorRatio=4 -XX:TargetSurvivorRatio=90 -XX:MaxTenuringThreshold=8"
+  solrJavaMem: "-Xms1g -Xmx3g"
