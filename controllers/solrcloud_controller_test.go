@@ -299,7 +299,7 @@ func TestCloudWithProvidedZookeeperReconcile(t *testing.T) {
 			ZookeeperRef: &solr.ZookeeperRef{
 				ProvidedZookeeper: &solr.ProvidedZookeeper{
 					ChRoot:    "a-ch/root",
-					Zookeeper: &solr.ZookeeperSpec{},
+					Zookeeper: solr.ZookeeperSpec{},
 				},
 			},
 		},
@@ -422,7 +422,7 @@ func TestDefaults(t *testing.T) {
 		Spec: solr.SolrCloudSpec{
 			ZookeeperRef: &solr.ZookeeperRef{
 				ProvidedZookeeper: &solr.ProvidedZookeeper{
-					Zookeeper: &solr.ZookeeperSpec{
+					Zookeeper: solr.ZookeeperSpec{
 						Replicas:                  nil,
 						Image:                     nil,
 						PersistentVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{},
@@ -498,7 +498,7 @@ func TestIngressDefaults(t *testing.T) {
 		Spec: solr.SolrCloudSpec{
 			ZookeeperRef: &solr.ZookeeperRef{
 				ProvidedZookeeper: &solr.ProvidedZookeeper{
-					Zookeeper: &solr.ZookeeperSpec{
+					Zookeeper: solr.ZookeeperSpec{
 						Replicas:                  nil,
 						Image:                     nil,
 						PersistentVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{},
