@@ -256,6 +256,10 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 			},
 			ServiceName: solrCloud.HeadlessServiceName(),
 			Replicas:    solrCloud.Spec.Replicas,
+			PodManagementPolicy: appsv1.ParallelPodManagement,
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.OnDeleteStatefulSetStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podLabels,
@@ -889,4 +893,12 @@ func CallCollectionsApi(cloud string, namespace string, urlParams url.Values, re
 	}
 
 	return err
+}
+
+// DeterminePodsSafeToUpgrade takes a list of solr Pods and returns a list of pods that are safe to upgrade now.
+// This function MUST be idempotent and return the same list of pods given the same kubernetes/solr state.
+func DeterminePodsSafeToUpgrade(pods []corev1.Pod) (podsToKill []corev1.Pod) {
+	// TODO: Implement
+	podsToKill = pods
+	return podsToKill
 }

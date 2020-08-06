@@ -215,6 +215,8 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		blockReconciliationOfStatefulSet = true
 	}
 
+	var statefulSetStatus appsv1.StatefulSetStatus
+
 	if !blockReconciliationOfStatefulSet {
 		// Generate StatefulSet
 		statefulSet := util.GenerateStatefulSet(instance, &newStatus, hostNameIpMap)
@@ -237,6 +239,7 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			}
 		} else if err == nil {
 			updateSS := true
+			statefulSetStatus = foundStatefulSet.Status
 			// If the statefulSet is using the wrong ZkConnectionString, we must first check that the new ZkConnection String is usable
 			if foundStatefulSet.Annotations[util.SolrZKConnectionStringAnnotation] != statefulSet.Annotations[util.SolrZKConnectionStringAnnotation] {
 				if zkErr := ensureZkChrootExists(r, instance, newStatus.ZookeeperConnectionInfo, &requeueOrNot); zkErr == nil {
@@ -251,17 +254,24 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 				r.Log.Info("Updating StatefulSet", "namespace", statefulSet.Namespace, "name", statefulSet.Name)
 				err = r.Update(context.TODO(), foundStatefulSet)
 			}
-			newStatus.Replicas = foundStatefulSet.Status.Replicas
-			newStatus.ReadyReplicas = foundStatefulSet.Status.ReadyReplicas
+			newStatus.Replicas = statefulSetStatus.Replicas
+			newStatus.ReadyReplicas = statefulSetStatus.ReadyReplicas
 		}
 		if err != nil {
 			return requeueOrNot, err
 		}
 	}
 
-	err = reconcileCloudStatus(r, instance, &newStatus)
+	outOfDatePods, err := reconcileCloudStatus(r, instance, &newStatus, statefulSetStatus)
 	if err != nil {
 		return requeueOrNot, err
+	}
+
+	podsToUpgrade := util.DeterminePodsSafeToUpgrade(outOfDatePods)
+	for _, pod := range podsToUpgrade{
+		r.Delete(context.Background(), &pod, client.Preconditions{
+			UID: &pod.UID,
+		})
 	}
 
 	extAddressabilityOpts := instance.Spec.SolrAddressability.External
@@ -300,7 +310,7 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	return requeueOrNot, nil
 }
 
-func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, newStatus *solr.SolrCloudStatus) (err error) {
+func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, newStatus *solr.SolrCloudStatus, statefulSetStatus appsv1.StatefulSetStatus) (outOfDatePods []corev1.Pod, err error) {
 	foundPods := &corev1.PodList{}
 	selectorLabels := solrCloud.SharedLabels()
 	selectorLabels["technology"] = solr.SolrTechnologyLabel
@@ -313,14 +323,21 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 
 	err = r.List(context.TODO(), foundPods, listOps)
 	if err != nil {
-		return err
+		return outOfDatePods, err
 	}
 
 	otherVersions := []string{}
 	nodeNames := make([]string, len(foundPods.Items))
 	nodeStatusMap := map[string]solr.SolrNodeStatus{}
 	backupRestoreReadyPods := 0
+
+	updateRevision := statefulSetStatus.UpdateRevision
 	for idx, p := range foundPods.Items {
+		// A pod is out of date if it's revision label is not equal to the statefulSetStatus' updateRevision.
+		if p.Labels["controller-revision-hash"] != updateRevision {
+			outOfDatePods = append(outOfDatePods, p)
+		}
+
 		nodeNames[idx] = p.Name
 		nodeStatus := solr.SolrNodeStatus{}
 		nodeStatus.Name = p.Name
@@ -381,7 +398,7 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 		newStatus.ExternalCommonAddress = &extAddress
 	}
 
-	return nil
+	return outOfDatePods, nil
 }
 
 func reconcileNodeService(r *SolrCloudReconciler, instance *solr.SolrCloud, nodeName string) (err error, ip string) {
