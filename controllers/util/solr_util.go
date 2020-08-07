@@ -17,10 +17,8 @@ limitations under the License.
 package util
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
+	"github.com/bloomberg/solr-operator/controllers/util/solr_api"
 	"net/url"
 	"sort"
 	"strconv"
@@ -30,7 +28,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	extv1 "k8s.io/api/extensions/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -869,36 +866,171 @@ func CopyIngressFields(from, to *extv1.Ingress) bool {
 	return requireUpdate
 }
 
-func CallCollectionsApi(cloud string, namespace string, urlParams url.Values, response interface{}) (err error) {
-	cloudUrl := solr.InternalURLForCloud(cloud, namespace)
-
-	urlParams.Set("wt", "json")
-
-	cloudUrl = cloudUrl + "/solr/admin/collections?" + urlParams.Encode()
-
-	resp := &http.Response{}
-	if resp, err = http.Get(cloudUrl); err != nil {
-		return err
-	}
-
-	defer resp.Body.Close()
-
-	if err == nil && resp.StatusCode != 200 {
-		b, _ := ioutil.ReadAll(resp.Body)
-		err = errors.NewServiceUnavailable(fmt.Sprintf("Recieved bad response code of %d from solr with response: %s", resp.StatusCode, string(b)))
-	}
-
-	if err == nil {
-		json.NewDecoder(resp.Body).Decode(&response)
-	}
-
-	return err
-}
-
 // DeterminePodsSafeToUpgrade takes a list of solr Pods and returns a list of pods that are safe to upgrade now.
 // This function MUST be idempotent and return the same list of pods given the same kubernetes/solr state.
-func DeterminePodsSafeToUpgrade(pods []corev1.Pod) (podsToKill []corev1.Pod) {
-	// TODO: Implement
-	podsToKill = pods
-	return podsToKill
+// TODO:
+//  - The current down replicas are not taken into consideration
+//  - If the replica in the shard is not active should it matter?
+func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod) (podsToUpgrade []corev1.Pod, err error) {
+	queryParams := url.Values{}
+	queryParams.Add("action", "CLUSTERSTATUS")
+	clusterResp := &solr_api.SolrClusterStatusResponse{}
+	overseerResp := &solr_api.SolrOverseerStatusResponse{}
+	err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, clusterResp)
+
+	if err == nil {
+		if hasError, apiErr := solr_api.CheckForCollectionsApiError("CLUSTERSTATUS", clusterResp.ResponseHeader); hasError {
+			err = apiErr
+		} else {
+			queryParams.Set("action", "OVERSEERSTATUS")
+			err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, overseerResp)
+			if hasError, apiErr := solr_api.CheckForCollectionsApiError("OVERSEERSTATUS", clusterResp.ResponseHeader); hasError {
+				err = apiErr
+			}
+		}
+	}
+	if err != nil {
+		log.Error(err, "Error retrieving cluster status", "namespace", cloud.Namespace, "cloud", cloud.Name)
+	} else {
+		podsToUpgrade = outOfDatePods
+		nodeContents := FindSolrNodeContents(clusterResp.ClusterStatus, overseerResp.Leader)
+		sortNodePodsBySafety(outOfDatePods, nodeContents, cloud)
+		podsToUpgrade := make([]corev1.Pod, len(outOfDatePods))
+		shardsAffected := map[string]int{}
+		// TODO: Make this configurable?
+		maxShardReplicasDown := 1
+		for _, pod := range outOfDatePods {
+			isSafe := true
+			nodeName := SolrNodeName(cloud, pod)
+			nodeContent, isInClusterState := nodeContents[nodeName]
+			// The overseer can only be upgraded by itself
+			if len(podsToUpgrade) == 0 {
+				// The lowest risk pod should always be upgraded
+				isSafe = true
+			} else if !isInClusterState {
+				// All pods not in the cluster state are safe to upgrade
+				isSafe = true
+			} else if nodeContent.overseer {
+				// The overseer can only be upgraded by itself
+				isSafe = false
+			} else {
+				for shard, additionalReplicaCount := range nodeContent.shards {
+					upgradeReplicaCount, _ := shardsAffected[shard]
+					if upgradeReplicaCount + additionalReplicaCount > maxShardReplicasDown {
+						isSafe = false
+						break
+					}
+				}
+			}
+			if isSafe {
+				for shard, additionalReplicaCount := range nodeContent.shards {
+					upgradeReplicaCount, _ := shardsAffected[shard]
+					shardsAffected[shard] = upgradeReplicaCount + additionalReplicaCount
+				}
+				podsToUpgrade = append(podsToUpgrade, pod)
+			}
+		}
+	}
+	return podsToUpgrade, err
+}
+
+func GroupPodsByNodeName(solrCloud *solr.SolrCloud, outOfDatePods []corev1.Pod) map[string]corev1.Pod {
+	grouped := make(map[string]corev1.Pod, len(outOfDatePods))
+	for _, pod := range outOfDatePods {
+		grouped[SolrNodeName(solrCloud, pod)] = pod
+	}
+	return grouped
+}
+
+func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNodeContents, solrCloud *solr.SolrCloud) {
+	sort.Slice(outOfDatePods, func(i, j int) bool {
+		nodeI, hasNodeI := nodeMap[SolrNodeName(solrCloud, outOfDatePods[i])]
+		if !hasNodeI  {
+			return true
+		} else if nodeI.overseer {
+			return false
+		}
+		nodeJ, hasNodeJ := nodeMap[SolrNodeName(solrCloud, outOfDatePods[i])]
+		if !hasNodeJ  {
+			return false
+		} else if nodeJ.overseer {
+			return true
+		}
+		return nodeI.leaders < nodeJ.leaders
+	})
+}
+
+func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader string) (nodeContents map[string]SolrNodeContents) {
+	nodeContents = map[string]SolrNodeContents{}
+	for collectionName, collection := range cluster.Collections {
+		for shardName, shard := range collection.Shards {
+			uniqueShard := collectionName + "|" + shardName
+			for _, replica := range shard.Replicas {
+				contents, hasValue := nodeContents[replica.NodeName]
+				if !hasValue {
+					contents = SolrNodeContents{
+						nodeName: replica.NodeName,
+						leaders:  0,
+						shards:   map[string]int{},
+						overseer: false,
+						live: 	  false,
+					}
+				}
+				if replica.Leader {
+					contents.leaders += 1
+				}
+				shardCount, hasShard := contents.shards[uniqueShard]
+				if !hasShard {
+					shardCount = 0
+				}
+				contents.shards[uniqueShard] = shardCount + 1
+				nodeContents[replica.NodeName] = contents
+			}
+		}
+	}
+	// Update the info for each "live" node.
+	for _, nodeName := range cluster.LiveNodes {
+		contents, hasValue := nodeContents[nodeName]
+		if !hasValue {
+			contents = SolrNodeContents{
+				nodeName: nodeName,
+				leaders:  0,
+				shards:   map[string]int{},
+				overseer: false,
+				live: 	  true,
+			}
+		} else {
+			contents.live = true
+		}
+		nodeContents[nodeName] = contents
+	}
+	// Update the info for the overseer leader.
+	if overseerLeader != "" {
+		contents, hasValue := nodeContents[overseerLeader]
+		if !hasValue {
+			contents = SolrNodeContents{
+				nodeName: overseerLeader,
+				leaders:  0,
+				shards:   map[string]int{},
+				overseer: true,
+				live: 	  false,
+			}
+		} else {
+			contents.overseer = true
+		}
+		nodeContents[overseerLeader] = contents
+	}
+	return nodeContents
+}
+
+type SolrNodeContents struct {
+	nodeName string
+	leaders int
+	shards map[string]int
+	overseer bool
+	live bool
+}
+
+func SolrNodeName(solrCloud *solr.SolrCloud, pod corev1.Pod) string {
+	return fmt.Sprintf("%s:%d_solr", solrCloud.AdvertisedNodeHost(pod.Name), solrCloud.NodePort())
 }

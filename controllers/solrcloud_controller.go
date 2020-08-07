@@ -267,8 +267,12 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return requeueOrNot, err
 	}
 
-	podsToUpgrade := util.DeterminePodsSafeToUpgrade(outOfDatePods)
+	podsToUpgrade, err := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods)
+	if err != nil {
+		return requeueOrNot, err
+	}
 	for _, pod := range podsToUpgrade{
+		r.Log.Info("Killing solr pod for upgrade", "pod", pod.Name, "namespace", instance.Namespace, "name", instance.Name)
 		r.Delete(context.Background(), &pod, client.Preconditions{
 			UID: &pod.UID,
 		})
