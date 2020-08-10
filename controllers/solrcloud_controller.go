@@ -267,7 +267,7 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return requeueOrNot, err
 	}
 
-	podsToUpgrade, err := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods)
+	podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, newStatus.Replicas, newStatus.ReadyReplicas)
 	if err != nil {
 		return requeueOrNot, err
 	}
@@ -350,20 +350,21 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 		if solrCloud.Spec.SolrAddressability.External != nil {
 			nodeStatus.ExternalAddress = "http://" + solrCloud.ExternalNodeUrl(nodeStatus.Name, solrCloud.Spec.SolrAddressability.External.DomainName, true)
 		}
-		ready := false
 		if len(p.Status.ContainerStatuses) > 0 {
-			ready = true
-			for _, c := range p.Status.ContainerStatuses {
-				ready = ready && c.Ready
-			}
-
 			// The first container should always be running solr
 			nodeStatus.Version = solr.ImageVersion(p.Spec.Containers[0].Image)
 			if nodeStatus.Version != solrCloud.Spec.SolrImage.Tag {
 				otherVersions = append(otherVersions, nodeStatus.Version)
 			}
 		}
-		nodeStatus.Ready = ready
+
+		// Check whether the node is considered "ready" by kubernetes
+		nodeStatus.Ready = false
+		for _, condition := range p.Status.Conditions {
+			if condition.Type == corev1.PodReady {
+				nodeStatus.Ready = condition.Status == corev1.ConditionTrue
+			}
+		}
 
 		nodeStatusMap[nodeStatus.Name] = nodeStatus
 
