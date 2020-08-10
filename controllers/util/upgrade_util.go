@@ -21,6 +21,7 @@ import (
 	solr "github.com/bloomberg/solr-operator/api/v1beta1"
 	"github.com/bloomberg/solr-operator/controllers/util/solr_api"
 	corev1 "k8s.io/api/core/v1"
+	"math"
 	"net/url"
 	"sort"
 )
@@ -35,6 +36,16 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 	queryParams.Add("action", "CLUSTERSTATUS")
 	clusterResp := &solr_api.SolrClusterStatusResponse{}
 	overseerResp := &solr_api.SolrOverseerStatusResponse{}
+
+	// TODO: Make these configurable?
+	maxShardReplicasDown := 1
+	maxBatchNodeUpgradeSpec := .5
+
+	// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
+	maxBatchNodeUpgrade := int(maxBatchNodeUpgradeSpec)
+	if maxBatchNodeUpgradeSpec > 0 && maxBatchNodeUpgradeSpec < 1 {
+		maxBatchNodeUpgrade = int(math.Ceil(maxBatchNodeUpgradeSpec * float64(cloud.Status.Replicas)))
+	}
 
 	if readyNodes > 0 {
 		err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, clusterResp)
@@ -53,11 +64,9 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 	if err != nil {
 		log.Error(err, "Error retrieving cluster status", "namespace", cloud.Namespace, "cloud", cloud.Name)
 	} else {
-		nodeContents, shardReplicasDown := FindSolrNodeContents(clusterResp.ClusterStatus, overseerResp.Leader)
+		nodeContents, shardReplicasNotActive := FindSolrNodeContents(clusterResp.ClusterStatus, overseerResp.Leader)
 		sortNodePodsBySafety(outOfDatePods, nodeContents, cloud)
 		podsToUpgrade = make([]corev1.Pod, 0)
-		// TODO: Make this configurable?
-		maxShardReplicasDown := 1
 		for _, pod := range outOfDatePods {
 			isSafe := true
 			nodeName := SolrNodeName(cloud, pod)
@@ -79,23 +88,35 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 					fmt.Printf("%s: Saved. Reason - overseer\n",pod.Name)
 				}
 			} else {
-				fmt.Printf("%s: Killed. Reason - does not conflict with shards\n",pod.Name)
-				for shard, additionalReplicaCount := range nodeContent.shards {
-					upgradeReplicaCount, _ := shardReplicasDown[shard]
+				fmt.Printf("%s: Killed. Reason - does not conflict with totalReplicasPerShard\n",pod.Name)
+				for shard, additionalReplicaCount := range nodeContent.totalReplicasPerShard {
+					// If all of the replicas for a shard on the node are down, then this is safe to kill
+					// TODO: Make sure this logic makes sense
+					if additionalReplicaCount == nodeContent.downReplicasPerShard[shard] {
+						 continue
+					}
+
+					notActiveReplicaCount, _ := shardReplicasNotActive[shard]
+
 					// We have to allow killing of Pods that have multiple replicas of a shard
 					// Therefore only check the additional Replica count if some replicas of that shard are already being upgraded
-					if upgradeReplicaCount > 0 && upgradeReplicaCount + additionalReplicaCount > maxShardReplicasDown {
+					// Also we only want to check the addition of the active replicas, as the non-active replicas are already included in the check.
+					if notActiveReplicaCount > 0 && notActiveReplicaCount + nodeContent.activeReplicasPerShard[shard] > maxShardReplicasDown {
 						isSafe = false
 						break
 					}
 				}
 			}
 			if isSafe {
-				for shard, additionalReplicaCount := range nodeContent.shards {
-					upgradeReplicaCount, _ := shardReplicasDown[shard]
-					shardReplicasDown[shard] = upgradeReplicaCount + additionalReplicaCount
+				for shard, additionalReplicaCount := range nodeContent.totalReplicasPerShard {
+					shardReplicasNotActive[shard] += additionalReplicaCount
 				}
 				podsToUpgrade = append(podsToUpgrade, pod)
+
+				// Stop after the maxBatchNodeUpgrade count, if one is provided.
+				if maxBatchNodeUpgrade >= 1 && len(podsToUpgrade) == maxBatchNodeUpgrade {
+					break
+				}
 			}
 		}
 	}
@@ -128,19 +149,21 @@ func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNod
 	})
 }
 
-func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader string) (nodeContents map[string]SolrNodeContents, shardReplicasDown map[string]int) {
+func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader string) (nodeContents map[string]SolrNodeContents, shardReplicasNotActive map[string]int) {
 	nodeContents = map[string]SolrNodeContents{}
-	shardReplicasDown = map[string]int{}
+	shardReplicasNotActive = map[string]int{}
 	// Update the info for each "live" node.
 	for _, nodeName := range cluster.LiveNodes {
 		contents, hasValue := nodeContents[nodeName]
 		if !hasValue {
 			contents = SolrNodeContents{
-				nodeName: nodeName,
-				leaders:  0,
-				shards:   map[string]int{},
-				overseer: false,
-				live: 	  true,
+				nodeName:              nodeName,
+				leaders:               0,
+				totalReplicasPerShard: map[string]int{},
+				activeReplicasPerShard: map[string]int{},
+				downReplicasPerShard:  map[string]int{},
+				overseer:              false,
+				live:                  true,
 			}
 		} else {
 			contents.live = true
@@ -155,23 +178,32 @@ func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 				contents, hasValue := nodeContents[replica.NodeName]
 				if !hasValue {
 					contents = SolrNodeContents{
-						nodeName: replica.NodeName,
-						leaders:  0,
-						shards:   map[string]int{},
-						overseer: false,
-						live: 	  false,
+						nodeName:              replica.NodeName,
+						leaders:               0,
+						totalReplicasPerShard: map[string]int{},
+						activeReplicasPerShard: map[string]int{},
+						downReplicasPerShard:  map[string]int{},
+						overseer:              false,
+						live:                  false,
 					}
 				}
 				if replica.Leader {
 					contents.leaders += 1
 				}
-				contents.shards[uniqueShard] += 1
-				nodeContents[replica.NodeName] = contents
+				contents.totalReplicasPerShard[uniqueShard] += 1
 
-				// A shard can be considered "down" if it's not Active or the node it lives in is not "live".
+				// A shard can be considered "not active" if it's state is not "active" or the node it lives in is not "live".
 				if replica.State != solr_api.ReplicaActive || !contents.live {
-					shardReplicasDown[uniqueShard] += 1
+					shardReplicasNotActive[uniqueShard] += 1
+				} else {
+					contents.activeReplicasPerShard[uniqueShard] += 1
 				}
+				// Keep track of how many of the replicas of this shard are in a down state (down or recovery_failed)
+				if replica.State == solr_api.ReplicaDown || replica.State == solr_api.ReplicaRecoveryFailed  {
+					contents.downReplicasPerShard[uniqueShard] += 1
+				}
+
+				nodeContents[replica.NodeName] = contents
 			}
 		}
 	}
@@ -180,26 +212,30 @@ func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 		contents, hasValue := nodeContents[overseerLeader]
 		if !hasValue {
 			contents = SolrNodeContents{
-				nodeName: overseerLeader,
-				leaders:  0,
-				shards:   map[string]int{},
-				overseer: true,
-				live: 	  false,
+				nodeName:              overseerLeader,
+				leaders:               0,
+				totalReplicasPerShard: map[string]int{},
+				activeReplicasPerShard: map[string]int{},
+				downReplicasPerShard:  map[string]int{},
+				overseer:              true,
+				live:                  false,
 			}
 		} else {
 			contents.overseer = true
 		}
 		nodeContents[overseerLeader] = contents
 	}
-	return nodeContents, shardReplicasDown
+	return nodeContents, shardReplicasNotActive
 }
 
 type SolrNodeContents struct {
-	nodeName string
-	leaders int
-	shards map[string]int
-	overseer bool
-	live bool
+	nodeName                string
+	leaders                 int
+	totalReplicasPerShard   map[string]int
+	activeReplicasPerShard  map[string]int
+	downReplicasPerShard    map[string]int
+	overseer                bool
+	live                    bool
 }
 
 func SolrNodeName(solrCloud *solr.SolrCloud, pod corev1.Pod) string {

@@ -39,7 +39,7 @@ func CreateCollection(cloud string, collection string, numShards int64, replicat
 
 	if routerName == solr.ImplicitRouter {
 		queryParams.Add("router.name", string(routerName))
-		queryParams.Add("shards", shards)
+		queryParams.Add("totalReplicasPerShard", shards)
 	} else if routerName == solr.CompositeIdRouter {
 		queryParams.Add("router.name", string(routerName))
 		queryParams.Add("numShards", numShardsParameter)
