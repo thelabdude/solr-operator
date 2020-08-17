@@ -5030,10 +5030,8 @@ spec:
                       type: object
                     persistentVolumeClaimSpec:
                       description: 'PersistentVolumeClaimSpec is the spec to describe
-                        PVC for the zk container This field is optional. If no PVC
-                        spec is provided, etcd container will use emptyDir as volume.
-                        WARNING: This field is DEPRECATED, please use the Persistence
-                        option'
+                        PVC for the zk container WARNING: This field is DEPRECATED,
+                        please use the Persistence option'
                       properties:
                         accessModes:
                           description: 'AccessModes contains the desired access modes
@@ -5319,10 +5317,8 @@ spec:
                           type: object
                         persistentVolumeClaimSpec:
                           description: 'PersistentVolumeClaimSpec is the spec to describe
-                            PVC for the zk container This field is optional. If no
-                            PVC spec is provided, etcd container will use emptyDir
-                            as volume. WARNING: This field is DEPRECATED, please use
-                            the Persistence option'
+                            PVC for the zk container WARNING: This field is DEPRECATED,
+                            please use the Persistence option'
                           properties:
                             accessModes:
                               description: 'AccessModes contains the desired access

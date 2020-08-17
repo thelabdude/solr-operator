@@ -469,7 +469,6 @@ type ZookeeperSpec struct {
 	Image *ContainerImage `json:"image,omitempty"`
 
 	// PersistentVolumeClaimSpec is the spec to describe PVC for the zk container
-	// This field is optional. If no PVC spec is provided, etcd container will use emptyDir as volume.
 	// WARNING: This field is DEPRECATED, please use the Persistence option
 	// +optional
 	PersistentVolumeClaimSpec *corev1.PersistentVolumeClaimSpec `json:"persistentVolumeClaimSpec,omitempty"`
@@ -702,16 +701,6 @@ func (sc *SolrCloud) ProvidedZookeeperName() string {
 // ProvidedZookeeperAddress returns the client address of the provided zk cluster
 func (sc *SolrCloud) ProvidedZookeeperAddress() string {
 	return fmt.Sprintf("%s-solrcloud-zookeeper-client:2181", sc.GetName())
-}
-
-// ProvidedZetcdName returns the name of the zetcd cluster
-func (sc *SolrCloud) ProvidedZetcdName() string {
-	return fmt.Sprintf("%s-solrcloud-zetcd", sc.GetName())
-}
-
-// IngressName returns the name of the ingress for the cloud
-func (sc *SolrCloud) ProvidedZetcdAddress() string {
-	return fmt.Sprintf("%s-solrcloud-zetcd:2181", sc.GetName())
 }
 
 // ZkConnectionString returns the zkConnectionString for the cloud

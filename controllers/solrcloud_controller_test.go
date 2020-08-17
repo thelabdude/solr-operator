@@ -46,7 +46,6 @@ var (
 
 func TestCloudReconcile(t *testing.T) {
 	SetIngressBaseUrl("")
-	UseEtcdCRD(false)
 	UseZkCRD(true)
 	g := gomega.NewGomegaWithT(t)
 
@@ -147,7 +146,6 @@ func TestCloudReconcile(t *testing.T) {
 func TestCustomKubeOptionsCloudReconcile(t *testing.T) {
 	ingressBaseDomain := "ing.base.domain"
 	SetIngressBaseUrl(ingressBaseDomain)
-	UseEtcdCRD(false)
 	UseZkCRD(true)
 	g := gomega.NewGomegaWithT(t)
 	replicas := int32(4)
@@ -290,7 +288,6 @@ func TestCustomKubeOptionsCloudReconcile(t *testing.T) {
 
 func TestCloudWithProvidedZookeeperReconcile(t *testing.T) {
 	SetIngressBaseUrl("")
-	UseEtcdCRD(false)
 	UseZkCRD(true)
 	g := gomega.NewGomegaWithT(t)
 	instance := &solr.SolrCloud{
@@ -353,7 +350,6 @@ func TestCloudWithProvidedZookeeperReconcile(t *testing.T) {
 
 func TestCloudWithExternalZookeeperChroot(t *testing.T) {
 	SetIngressBaseUrl("")
-	UseEtcdCRD(false)
 	UseZkCRD(true)
 	g := gomega.NewGomegaWithT(t)
 	instance := &solr.SolrCloud{
@@ -414,7 +410,6 @@ func TestCloudWithExternalZookeeperChroot(t *testing.T) {
 
 func TestDefaults(t *testing.T) {
 	SetIngressBaseUrl("")
-	UseEtcdCRD(false)
 	UseZkCRD(true)
 	g := gomega.NewGomegaWithT(t)
 	instance := &solr.SolrCloud{
@@ -490,7 +485,6 @@ func TestDefaults(t *testing.T) {
 
 func TestIngressDefaults(t *testing.T) {
 	SetIngressBaseUrl("test.ingress.url")
-	UseEtcdCRD(false)
 	UseZkCRD(true)
 	g := gomega.NewGomegaWithT(t)
 	instance := &solr.SolrCloud{
@@ -602,7 +596,6 @@ func TestIngressDefaults(t *testing.T) {
 
 func TestExternalKubeDomainCloudReconcile(t *testing.T) {
 	SetIngressBaseUrl("")
-	UseEtcdCRD(false)
 	UseZkCRD(false)
 	g := gomega.NewGomegaWithT(t)
 

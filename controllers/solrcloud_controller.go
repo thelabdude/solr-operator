@@ -21,7 +21,6 @@ import (
 	"fmt"
 	solr "github.com/bloomberg/solr-operator/api/v1beta1"
 	"github.com/bloomberg/solr-operator/controllers/util"
-	etcd "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/go-logr/logr"
 	zk "github.com/pravega/zookeeper-operator/pkg/apis/zookeeper/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -49,15 +48,10 @@ type SolrCloudReconciler struct {
 }
 
 var useZkCRD bool
-var useEtcdCRD bool
 var IngressBaseUrl string
 
 func UseZkCRD(useCRD bool) {
 	useZkCRD = useCRD
-}
-
-func UseEtcdCRD(useCRD bool) {
-	useEtcdCRD = useCRD
 }
 
 func SetIngressBaseUrl(ingressBaseUrl string) {
@@ -479,9 +473,6 @@ func (r *SolrCloudReconciler) SetupWithManagerAndReconciler(mgr ctrl.Manager, re
 
 	if useZkCRD {
 		ctrlBuilder = ctrlBuilder.Owns(&zk.ZookeeperCluster{})
-	}
-	if useEtcdCRD {
-		ctrlBuilder = ctrlBuilder.Owns(&etcd.EtcdCluster{})
 	}
 
 	r.scheme = mgr.GetScheme()
