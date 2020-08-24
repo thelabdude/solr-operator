@@ -399,6 +399,12 @@ func CopyStatefulSetFields(from, to *appsv1.StatefulSet) bool {
 		to.Spec.Selector = from.Spec.Selector
 	}
 
+	if !DeepEqualWithNils(to.Spec.UpdateStrategy, from.Spec.UpdateStrategy) {
+		requireUpdate = true
+		log.Info("Update required because:", "Spec.UpdateStrategy changed from", to.Spec.UpdateStrategy, "To:", from.Spec.UpdateStrategy)
+		to.Spec.UpdateStrategy = from.Spec.UpdateStrategy
+	}
+
 	requireVolumeUpdate := false
 	if len(from.Spec.VolumeClaimTemplates) != len(to.Spec.VolumeClaimTemplates) {
 		requireVolumeUpdate = true
