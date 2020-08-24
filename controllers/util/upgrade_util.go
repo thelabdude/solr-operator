@@ -132,14 +132,14 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 }
 
 func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNodeContents, solrCloud *solr.SolrCloud) {
-	sort.Slice(outOfDatePods, func(i, j int) bool {
+	sort.SliceStable(outOfDatePods, func(i, j int) bool {
 		nodeI, hasNodeI := nodeMap[SolrNodeName(solrCloud, outOfDatePods[i])]
 		if !hasNodeI  {
 			return true
 		} else if nodeI.overseerLeader {
 			return false
 		}
-		nodeJ, hasNodeJ := nodeMap[SolrNodeName(solrCloud, outOfDatePods[i])]
+		nodeJ, hasNodeJ := nodeMap[SolrNodeName(solrCloud, outOfDatePods[j])]
 		if !hasNodeJ  {
 			return false
 		} else if nodeJ.overseerLeader {
