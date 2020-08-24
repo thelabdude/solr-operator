@@ -105,8 +105,8 @@ type SolrShardStatus struct {
 type SolrShardState string
 
 const (
-	ShardActive         SolrShardState = "active"
-	ShardDown           SolrShardState = "down"
+	ShardActive SolrShardState = "active"
+	ShardDown   SolrShardState = "down"
 )
 
 type SolrReplicaStatus struct {
@@ -136,7 +136,7 @@ const (
 type SolrReplicaType string
 
 const (
-	NRT                   SolrReplicaType = "NRT"
-	TLOG                  SolrReplicaType = "TLOG"
-	PULL     SolrReplicaType = "PULL"
+	NRT  SolrReplicaType = "NRT"
+	TLOG SolrReplicaType = "TLOG"
+	PULL SolrReplicaType = "PULL"
 )

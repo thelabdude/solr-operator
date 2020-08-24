@@ -35,90 +35,78 @@ func TestPodUpgradeOrdering(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"},
 		Spec: solr.SolrCloudSpec{
 			SolrAddressability: solr.SolrAddressabilityOptions{
-				PodPort:           2000,
+				PodPort: 2000,
 			},
 		},
 	}
 
-	pods := []corev1.Pod {
+	pods := []corev1.Pod{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-0"},
-			Spec: corev1.PodSpec{
-
-			},
+			Spec:       corev1.PodSpec{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-1"},
-			Spec: corev1.PodSpec{
-
-			},
+			Spec:       corev1.PodSpec{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-2"},
-			Spec: corev1.PodSpec{
-
-			},
+			Spec:       corev1.PodSpec{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-3"},
-			Spec: corev1.PodSpec{
-
-			},
+			Spec:       corev1.PodSpec{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-4"},
-			Spec: corev1.PodSpec{
-
-			},
+			Spec:       corev1.PodSpec{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-5"},
-			Spec: corev1.PodSpec{
-
-			},
+			Spec:       corev1.PodSpec{},
 		},
 	}
 
 	nodeMap := map[string]SolrNodeContents{
 		SolrNodeName(solrCloud, pods[0]): {
-			nodeName:               SolrNodeName(solrCloud, pods[0]),
-			leaders:                4,
-			overseerLeader:         true,
-			live:                   true,
+			nodeName:       SolrNodeName(solrCloud, pods[0]),
+			leaders:        4,
+			overseerLeader: true,
+			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[1]): {
-			nodeName:               SolrNodeName(solrCloud, pods[1]),
-			leaders:                8,
-			overseerLeader:         false,
-			live:                   false,
+			nodeName:       SolrNodeName(solrCloud, pods[1]),
+			leaders:        8,
+			overseerLeader: false,
+			live:           false,
 		},
 		SolrNodeName(solrCloud, pods[2]): {
-			nodeName:               SolrNodeName(solrCloud, pods[2]),
-			leaders:                0,
-			overseerLeader:         false,
-			live:                   true,
+			nodeName:       SolrNodeName(solrCloud, pods[2]),
+			leaders:        0,
+			overseerLeader: false,
+			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[3]): {
-			nodeName:               SolrNodeName(solrCloud, pods[3]),
-			leaders:                3,
-			overseerLeader:         false,
-			live:                   true,
+			nodeName:       SolrNodeName(solrCloud, pods[3]),
+			leaders:        3,
+			overseerLeader: false,
+			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[4]): {
-			nodeName:               SolrNodeName(solrCloud, pods[4]),
-			leaders:                10,
-			overseerLeader:         false,
-			live:                   true,
+			nodeName:       SolrNodeName(solrCloud, pods[4]),
+			leaders:        10,
+			overseerLeader: false,
+			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[5]): {
-			nodeName:               SolrNodeName(solrCloud, pods[5]),
-			leaders:                3,
-			overseerLeader:         false,
-			live:                   true,
+			nodeName:       SolrNodeName(solrCloud, pods[5]),
+			leaders:        3,
+			overseerLeader: false,
+			live:           true,
 		},
 	}
 
-	expectedOrdering := []string {"pod-2", "pod-3", "pod-5", "pod-1", "pod-4", "pod-0"}
+	expectedOrdering := []string{"pod-2", "pod-3", "pod-5", "pod-1", "pod-4", "pod-0"}
 
 	sortNodePodsBySafety(pods, nodeMap, solrCloud)
 	foundOrdering := make([]string, len(pods))

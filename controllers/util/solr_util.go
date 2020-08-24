@@ -248,8 +248,8 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 			Selector: &metav1.LabelSelector{
 				MatchLabels: selectorLabels,
 			},
-			ServiceName: solrCloud.HeadlessServiceName(),
-			Replicas:    solrCloud.Spec.Replicas,
+			ServiceName:         solrCloud.HeadlessServiceName(),
+			Replicas:            solrCloud.Spec.Replicas,
 			PodManagementPolicy: appsv1.ParallelPodManagement,
 			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
 				Type: appsv1.OnDeleteStatefulSetStrategyType,
@@ -868,4 +868,3 @@ func CopyIngressFields(from, to *extv1.Ingress) bool {
 
 	return requireUpdate
 }
-
