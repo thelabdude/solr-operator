@@ -31,6 +31,44 @@ var (
 	expectedBackupRequest = reconcile.Request{NamespacedName: types.NamespacedName{Name: "foo-back", Namespace: "default"}}
 )
 
+func TestPickPodsToUpgrade(t *testing.T) {
+	overseerLeader := "pod-0.foo-solrcloud-headless.default:2000_solr"
+
+	solrCloud := &solr.SolrCloud{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"},
+		Spec: solr.SolrCloudSpec{
+			SolrAddressability: solr.SolrAddressabilityOptions{
+				PodPort: 2000,
+			},
+		},
+	}
+
+	pods := []corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-1"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-2"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-3"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-4"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-5"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-6"}, Spec: corev1.PodSpec{}},
+	}
+
+	podsToUpgrade := getPodNames(pickPodsToUpgrade(solrCloud, pods, testClusterStatus, overseerLeader, 6, 1, .5))
+
+	// Only pod's 4 and 6 should be upgraded first.
+	assert.ElementsMatch(t, []string{"pod-4", "pod-6"}, podsToUpgrade, "Incorrect set of next pods to upgrade.")
+
+	pods = []corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}, Spec: corev1.PodSpec{}},
+	}
+
+	// TODO: Test for the overseer being the last node.
+	// podsToUpgrade = getPodNames(pickPodsToUpgrade(solrCloud, pods, testClusterStatus, overseerLeader, 6, 1, .5))
+
+	// Only pod's 4 and 6 should be upgraded first.
+	// assert.ElementsMatch(t, []string{"pod-4", "pod-6"}, podsToUpgrade, "Incorrect set of next pods to upgrade.")
+}
+
 func TestPodUpgradeOrdering(t *testing.T) {
 	solrCloud := &solr.SolrCloud{
 		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"},
@@ -105,7 +143,7 @@ func TestPodUpgradeOrdering(t *testing.T) {
 func TestFindSolrNodeContents(t *testing.T) {
 	overseerLeader := "pod-0.foo-solrcloud-headless.default:2000_solr"
 
-	nodeContents, shardReplicasNotActive := FindSolrNodeContents(testClusterStatus, overseerLeader)
+	nodeContents, totalShardReplicas, shardReplicasNotActive := findSolrNodeContents(testClusterStatus, overseerLeader)
 
 	expectedNodeContents := map[string]SolrNodeContents{
 		"pod-0.foo-solrcloud-headless.default:2000_solr": {
@@ -203,6 +241,14 @@ func TestFindSolrNodeContents(t *testing.T) {
 		assert.Truef(t, found, "No nodeContents found for node %s", node)
 		assert.EqualValuesf(t, expectedContents, foundNodeContents, "NodeContents information from clusterstate is incorrect for node %s", node)
 	}
+
+	expectedTotalShardReplicas := map[string]int{
+		"col1|shard1": 3,
+		"col1|shard2": 3,
+		"col2|shard1": 3,
+		"col2|shard2": 4,
+	}
+	assert.EqualValues(t, expectedTotalShardReplicas, totalShardReplicas, "Shards replica count is incorrect.")
 
 	expectedShardReplicasNotActive := map[string]int{
 		"col1|shard1": 1,
@@ -382,3 +428,11 @@ var (
 		},
 	}
 )
+
+func getPodNames(pods []corev1.Pod) []string {
+	names := make([]string, len(pods))
+	for i, pod := range pods {
+		names[i] = pod.Name
+	}
+	return names
+}

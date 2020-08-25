@@ -268,7 +268,7 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	// Throw away the error because it will only happen because all pods are down and the pod statuses haven't been updated, causing a Http Exception.
-	podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, newStatus.Replicas, newStatus.ReadyReplicas)
+	podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, int(newStatus.Replicas), int(newStatus.ReadyReplicas))
 	if err != nil {
 		return requeueOrNot, err
 	}

@@ -38,23 +38,17 @@ import (
 //      - maxShardReplicasDown (defaults to 1)
 //		- maxBatchNodeUpgrade (<=0 is unlimited, 0-1 is a percentage of total nodes, >1 is a hard number)
 //    - Manual: Managed by the users deleting their own pods.
-func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, totalNodes int32, readyNodes int32) (podsToUpgrade []corev1.Pod, err error) {
+func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, totalPods int, readyPods int) (podsToUpgrade []corev1.Pod, err error) {
 	queryParams := url.Values{}
 	queryParams.Add("action", "CLUSTERSTATUS")
 	clusterResp := &solr_api.SolrClusterStatusResponse{}
 	overseerResp := &solr_api.SolrOverseerStatusResponse{}
 
 	// TODO: Make these configurable?
-	maxShardReplicasDown := 1
+	maxShardReplicasDown := 1.0
 	maxBatchNodeUpgradeSpec := .5
 
-	// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
-	maxBatchNodeUpgrade := int(maxBatchNodeUpgradeSpec)
-	if maxBatchNodeUpgradeSpec > 0 && maxBatchNodeUpgradeSpec < 1 {
-		maxBatchNodeUpgrade = int(math.Ceil(maxBatchNodeUpgradeSpec * float64(cloud.Status.Replicas)))
-	}
-
-	if readyNodes > 0 {
+	if readyPods > 0 {
 		err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, clusterResp)
 		if err == nil {
 			if hasError, apiErr := solr_api.CheckForCollectionsApiError("CLUSTERSTATUS", clusterResp.ResponseHeader); hasError {
@@ -71,63 +65,85 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 	if err != nil {
 		log.Error(err, "Error retrieving cluster status", "namespace", cloud.Namespace, "cloud", cloud.Name)
 	} else {
-		nodeContents, shardReplicasNotActive := FindSolrNodeContents(clusterResp.ClusterStatus, overseerResp.Leader)
-		sortNodePodsBySafety(outOfDatePods, nodeContents, cloud)
-		var podsToUpgrade []corev1.Pod
-		for _, pod := range outOfDatePods {
-			isSafe := true
-			nodeName := SolrNodeName(cloud, pod)
-			nodeContent, isInClusterState := nodeContents[nodeName]
-			fmt.Printf("%s: %t %+v\n", pod.Name, isInClusterState, nodeContent)
+		podsToUpgrade = pickPodsToUpgrade(cloud, outOfDatePods, clusterResp.ClusterStatus, overseerResp.Leader, totalPods, maxShardReplicasDown, maxBatchNodeUpgradeSpec)
+	}
+	return podsToUpgrade, err
+}
+
+func pickPodsToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, clusterStatus solr_api.SolrClusterStatus,
+	overseer string, totalPods int, maxShardReplicasDownSpec float64, maxBatchNodeUpgradeSpec float64) (podsToUpgrade []corev1.Pod) {
+
+	nodeContents, totalShardReplicas, shardReplicasNotActive := findSolrNodeContents(clusterStatus, overseer)
+	sortNodePodsBySafety(outOfDatePods, nodeContents, cloud)
+
+	// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
+	maxBatchNodeUpgrade := int(maxBatchNodeUpgradeSpec)
+	if maxBatchNodeUpgradeSpec > 0 && maxBatchNodeUpgradeSpec < 1 {
+		maxBatchNodeUpgrade = int(math.Ceil(maxBatchNodeUpgradeSpec * float64(totalPods)))
+	}
+
+	for _, pod := range outOfDatePods {
+		isSafe := true
+		nodeName := SolrNodeName(cloud, pod)
+		nodeContent, isInClusterState := nodeContents[nodeName]
+		fmt.Printf("%s: %t %+v\n", pod.Name, isInClusterState, nodeContent)
+		// The overseerLeader can only be upgraded by itself
+		if !isInClusterState {
+			// All pods not in the cluster state are safe to upgrade
+			isSafe = true
+			fmt.Printf("%s: Killed. Reason - not in cluster state\n", pod.Name)
+		} else if nodeContent.overseerLeader {
 			// The overseerLeader can only be upgraded by itself
-			if !isInClusterState {
-				// All pods not in the cluster state are safe to upgrade
+			// We want to update it when it's the last out of date pods and all nodes are "live"
+			if len(outOfDatePods) == 1 && len(clusterStatus.LiveNodes) == totalPods {
 				isSafe = true
-				fmt.Printf("%s: Killed. Reason - not in cluster state\n", pod.Name)
-			} else if nodeContent.overseerLeader {
-				// The overseerLeader can only be upgraded by itself
-				// We want to update it when it's the last out of date pods and all other nodes are ready
-				if len(outOfDatePods) == 1 && readyNodes == totalNodes {
-					isSafe = true
-					fmt.Printf("%s: Killed. Reason - overseerLeader & last node\n", pod.Name)
-				} else {
-					isSafe = false
-					fmt.Printf("%s: Saved. Reason - overseerLeader\n", pod.Name)
-				}
+				fmt.Printf("%s: Killed. Reason - overseerLeader & last node\n", pod.Name)
 			} else {
-				fmt.Printf("%s: Killed. Reason - does not conflict with totalReplicasPerShard\n", pod.Name)
-				for shard, additionalReplicaCount := range nodeContent.totalReplicasPerShard {
-					// If all of the replicas for a shard on the node are down, then this is safe to kill
-					// TODO: Make sure this logic makes sense
-					if additionalReplicaCount == nodeContent.downReplicasPerShard[shard] {
-						continue
-					}
-
-					notActiveReplicaCount, _ := shardReplicasNotActive[shard]
-
-					// We have to allow killing of Pods that have multiple replicas of a shard
-					// Therefore only check the additional Replica count if some replicas of that shard are already being upgraded
-					// Also we only want to check the addition of the active replicas, as the non-active replicas are already included in the check.
-					if notActiveReplicaCount > 0 && notActiveReplicaCount+nodeContent.activeReplicasPerShard[shard] > maxShardReplicasDown {
-						isSafe = false
-						break
-					}
-				}
+				isSafe = false
+				fmt.Printf("%s: Saved. Reason - overseerLeader\n", pod.Name)
 			}
-			if isSafe {
-				for shard, additionalReplicaCount := range nodeContent.totalReplicasPerShard {
-					shardReplicasNotActive[shard] += additionalReplicaCount
+		} else {
+			for shard, additionalReplicaCount := range nodeContent.totalReplicasPerShard {
+				// If all of the replicas for a shard on the node are down, then this is safe to kill.
+				// Currently this logic lets replicas in recovery continue recovery rather than killing them.
+				// TODO: Make sure this logic makes sense
+				if additionalReplicaCount == nodeContent.downReplicasPerShard[shard] || !nodeContent.live {
+					continue
 				}
-				podsToUpgrade = append(podsToUpgrade, pod)
 
-				// Stop after the maxBatchNodeUpgrade count, if one is provided.
-				if maxBatchNodeUpgrade >= 1 && len(podsToUpgrade) == maxBatchNodeUpgrade {
+				notActiveReplicaCount, _ := shardReplicasNotActive[shard]
+
+				// We have to allow killing of Pods that have multiple replicas of a shard
+				// Therefore only check the additional Replica count if some replicas of that shard are already being upgraded
+				// Also we only want to check the addition of the active replicas, as the non-active replicas are already included in the check.
+				// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
+				maxShardReplicasDown := int(maxShardReplicasDownSpec)
+				if maxShardReplicasDownSpec > 0 && maxShardReplicasDownSpec < 1 {
+					maxShardReplicasDown = int(math.Floor(maxShardReplicasDownSpec * float64(totalShardReplicas[shard])))
+				}
+				if notActiveReplicaCount > 0 && notActiveReplicaCount+nodeContent.activeReplicasPerShard[shard] > maxShardReplicasDown {
+					fmt.Printf("%s: Saved. Reason - shard %s already has %d replicas not active, taking down %d more would put it over the maximum allowed down: %d\n", pod.Name, shard, notActiveReplicaCount, nodeContent.activeReplicasPerShard[shard], maxShardReplicasDown)
+					isSafe = false
 					break
 				}
 			}
+			if isSafe {
+				fmt.Printf("%s: Killed. Reason - does not conflict with totalReplicasPerShard\n", pod.Name)
+			}
+		}
+		if isSafe {
+			for shard, additionalReplicaCount := range nodeContent.activeReplicasPerShard {
+				shardReplicasNotActive[shard] += additionalReplicaCount
+			}
+			podsToUpgrade = append(podsToUpgrade, pod)
+
+			// Stop after the maxBatchNodeUpgrade count, if one is provided.
+			if maxBatchNodeUpgrade >= 1 && len(podsToUpgrade) >= maxBatchNodeUpgrade {
+				break
+			}
 		}
 	}
-	return podsToUpgrade, err
+	return podsToUpgrade
 }
 
 func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNodeContents, solrCloud *solr.SolrCloud) {
@@ -154,8 +170,9 @@ This aggregated info is returned as:
 	- A map from Solr nodeName to SolrNodeContents, with the information from the clusterState and overseerLeader
     - A map from unique shard name (collection+shard) to the count of replicas that are not active for that shard.
 */
-func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader string) (nodeContents map[string]SolrNodeContents, shardReplicasNotActive map[string]int) {
+func findSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader string) (nodeContents map[string]SolrNodeContents, totalShardReplicas map[string]int, shardReplicasNotActive map[string]int) {
 	nodeContents = map[string]SolrNodeContents{}
+	totalShardReplicas = map[string]int{}
 	shardReplicasNotActive = map[string]int{}
 	// Update the info for each "live" node.
 	for _, nodeName := range cluster.LiveNodes {
@@ -179,6 +196,7 @@ func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 	for collectionName, collection := range cluster.Collections {
 		for shardName, shard := range collection.Shards {
 			uniqueShard := collectionName + "|" + shardName
+			totalShardReplicas[uniqueShard] = len(shard.Replicas)
 			for _, replica := range shard.Replicas {
 				contents, hasValue := nodeContents[replica.NodeName]
 				if !hasValue {
@@ -230,7 +248,7 @@ func FindSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 		}
 		nodeContents[overseerLeader] = contents
 	}
-	return nodeContents, shardReplicasNotActive
+	return nodeContents, totalShardReplicas, shardReplicasNotActive
 }
 
 type SolrNodeContents struct {
