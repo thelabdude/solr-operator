@@ -18,6 +18,7 @@ package util
 
 import (
 	solr "github.com/bloomberg/solr-operator/api/v1beta1"
+	"github.com/bloomberg/solr-operator/controllers/util/solr_api"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,33 +42,16 @@ func TestPodUpgradeOrdering(t *testing.T) {
 	}
 
 	pods := []corev1.Pod{
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-0"},
-			Spec:       corev1.PodSpec{},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-1"},
-			Spec:       corev1.PodSpec{},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-2"},
-			Spec:       corev1.PodSpec{},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-3"},
-			Spec:       corev1.PodSpec{},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-4"},
-			Spec:       corev1.PodSpec{},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-5"},
-			Spec:       corev1.PodSpec{},
-		},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-1"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-2"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-3"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-4"}, Spec: corev1.PodSpec{}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-5"}, Spec: corev1.PodSpec{}},
 	}
 
 	nodeMap := map[string]SolrNodeContents{
+		// This node should be last as it is the overseer
 		SolrNodeName(solrCloud, pods[0]): {
 			nodeName:       SolrNodeName(solrCloud, pods[0]),
 			leaders:        4,
@@ -92,12 +76,14 @@ func TestPodUpgradeOrdering(t *testing.T) {
 			overseerLeader: false,
 			live:           true,
 		},
+		// This node should come second to last as it is not the overseer, but it has the most leaders.
 		SolrNodeName(solrCloud, pods[4]): {
 			nodeName:       SolrNodeName(solrCloud, pods[4]),
 			leaders:        10,
 			overseerLeader: false,
 			live:           true,
 		},
+		// This node should come after pod 3 since they are identically ordered, but the name pod-3 comes before pod-5.
 		SolrNodeName(solrCloud, pods[5]): {
 			nodeName:       SolrNodeName(solrCloud, pods[5]),
 			leaders:        3,
@@ -115,3 +101,284 @@ func TestPodUpgradeOrdering(t *testing.T) {
 	}
 	assert.EqualValues(t, expectedOrdering, foundOrdering, "Ordering of pods not correct.")
 }
+
+func TestFindSolrNodeContents(t *testing.T) {
+	overseerLeader := "pod-0.foo-solrcloud-headless.default:2000_solr"
+
+	nodeContents, shardReplicasNotActive := FindSolrNodeContents(testClusterStatus, overseerLeader)
+
+	expectedNodeContents := map[string]SolrNodeContents{
+		"pod-0.foo-solrcloud-headless.default:2000_solr": {
+			nodeName: "pod-0.foo-solrcloud-headless.default:2000_solr",
+			leaders:  0,
+			totalReplicasPerShard: map[string]int{
+				"col1|shard1": 1,
+				"col2|shard2": 1,
+			},
+			activeReplicasPerShard: map[string]int{
+				"col1|shard1": 1,
+			},
+			downReplicasPerShard: map[string]int{
+				"col2|shard2": 1,
+			},
+			overseerLeader: true,
+			live:           true,
+		},
+		"pod-1.foo-solrcloud-headless.default:2000_solr": {
+			nodeName: "pod-1.foo-solrcloud-headless.default:2000_solr",
+			leaders:  1,
+			totalReplicasPerShard: map[string]int{
+				"col1|shard2": 1,
+				"col2|shard1": 1,
+			},
+			activeReplicasPerShard: map[string]int{
+				"col1|shard2": 1,
+				"col2|shard1": 1,
+			},
+			downReplicasPerShard: map[string]int{},
+			overseerLeader:       false,
+			live:                 true,
+		},
+		"pod-2.foo-solrcloud-headless.default:2000_solr": {
+			nodeName: "pod-2.foo-solrcloud-headless.default:2000_solr",
+			leaders:  0,
+			totalReplicasPerShard: map[string]int{
+				"col1|shard1": 1,
+				"col1|shard2": 1,
+			},
+			activeReplicasPerShard: map[string]int{
+				"col1|shard2": 1,
+			},
+			downReplicasPerShard: map[string]int{},
+			overseerLeader:       false,
+			live:                 true,
+		},
+		"pod-3.foo-solrcloud-headless.default:2000_solr": {
+			nodeName: "pod-3.foo-solrcloud-headless.default:2000_solr",
+			leaders:  2,
+			totalReplicasPerShard: map[string]int{
+				"col1|shard1": 1,
+				"col2|shard1": 1,
+				"col2|shard2": 1,
+			},
+			activeReplicasPerShard: map[string]int{
+				"col1|shard1": 1,
+			},
+			downReplicasPerShard: map[string]int{
+				"col2|shard1": 1,
+				"col2|shard2": 1,
+			},
+			overseerLeader: false,
+			live:           true,
+		},
+		"pod-4.foo-solrcloud-headless.default:2000_solr": {
+			nodeName: "pod-4.foo-solrcloud-headless.default:2000_solr",
+			leaders:  0,
+			totalReplicasPerShard: map[string]int{
+				"col2|shard1": 1,
+			},
+			activeReplicasPerShard: map[string]int{},
+			downReplicasPerShard:   map[string]int{},
+			overseerLeader:         false,
+			live:                   false,
+		},
+		"pod-5.foo-solrcloud-headless.default:2000_solr": {
+			nodeName: "pod-5.foo-solrcloud-headless.default:2000_solr",
+			leaders:  1,
+			totalReplicasPerShard: map[string]int{
+				"col1|shard2": 1,
+				"col2|shard2": 2,
+			},
+			activeReplicasPerShard: map[string]int{
+				"col2|shard2": 2,
+			},
+			downReplicasPerShard: map[string]int{},
+			overseerLeader:       false,
+			live:                 true,
+		},
+	}
+	assert.Equal(t, 6, len(nodeContents), "Number of Solr nodes with content information is incorrect.")
+	for node, expectedContents := range expectedNodeContents {
+		foundNodeContents, found := nodeContents[node]
+		assert.Truef(t, found, "No nodeContents found for node %s", node)
+		assert.EqualValuesf(t, expectedContents, foundNodeContents, "NodeContents information from clusterstate is incorrect for node %s", node)
+	}
+
+	expectedShardReplicasNotActive := map[string]int{
+		"col1|shard1": 1,
+		"col1|shard2": 1,
+		"col2|shard1": 2,
+		"col2|shard2": 2,
+	}
+	assert.EqualValues(t, expectedShardReplicasNotActive, shardReplicasNotActive, "Shards with replicas not active information is incorrect.")
+}
+
+func TestSolrNodeName(t *testing.T) {
+	solrCloud := &solr.SolrCloud{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"},
+		Spec: solr.SolrCloudSpec{
+			SolrAddressability: solr.SolrAddressabilityOptions{
+				PodPort:           2000,
+				CommonServicePort: 80,
+			},
+		},
+	}
+
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-0"},
+		Spec:       corev1.PodSpec{},
+	}
+
+	assert.Equal(t, "pod-0.foo-solrcloud-headless.default:2000_solr", SolrNodeName(solrCloud, pod), "Incorrect generation of Solr nodeName")
+
+	solrCloud.Spec.SolrAddressability.PodPort = 3000
+	assert.Equal(t, "pod-0.foo-solrcloud-headless.default:3000_solr", SolrNodeName(solrCloud, pod), "Incorrect generation of Solr nodeName")
+}
+
+var (
+	testClusterStatus = solr_api.SolrClusterStatus{
+		LiveNodes: []string{
+			"pod-0.foo-solrcloud-headless.default:2000_solr",
+			"pod-1.foo-solrcloud-headless.default:2000_solr",
+			"pod-2.foo-solrcloud-headless.default:2000_solr",
+			"pod-3.foo-solrcloud-headless.default:2000_solr",
+			"pod-5.foo-solrcloud-headless.default:2000_solr",
+		},
+		Collections: map[string]solr_api.SolrCollectionStatus{
+			"col1": {
+				Shards: map[string]solr_api.SolrShardStatus{
+					"shard1": {
+						Replicas: map[string]solr_api.SolrReplicaStatus{
+							"rep-1-1-1": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-0.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-0.foo-solrcloud-headless.default:2000/solr/rep-1-1-1",
+								Leader:   false,
+								Type:     solr_api.PULL,
+							},
+							"rep-1-1-2": {
+								State:    solr_api.ReplicaRecovering,
+								Core:     "core1",
+								NodeName: "pod-2.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-2.foo-solrcloud-headless.default:2000/solr/rep-1-1-2",
+								Leader:   false,
+								Type:     solr_api.TLOG,
+							},
+							"rep-1-1-3": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-3.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-3.foo-solrcloud-headless.default:2000/solr/rep-1-1-3",
+								Leader:   true,
+								Type:     solr_api.TLOG,
+							},
+						},
+						State: solr_api.ShardActive,
+					},
+					"shard2": {
+						Replicas: map[string]solr_api.SolrReplicaStatus{
+							"rep-1-2-1": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-2.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-2.foo-solrcloud-headless.default:2000/solr/rep-1-2-1",
+								Leader:   false,
+								Type:     solr_api.NRT,
+							},
+							"rep-1-2-2": {
+								State:    solr_api.ReplicaRecovering,
+								Core:     "core1",
+								NodeName: "pod-5.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-5.foo-solrcloud-headless.default:2000/solr/rep-1-2-2",
+								Leader:   false,
+								Type:     solr_api.NRT,
+							},
+							"rep-1-2-3": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-1.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-1.foo-solrcloud-headless.default:2000/solr/rep-1-2-3",
+								Leader:   true,
+								Type:     solr_api.NRT,
+							},
+						},
+						State: solr_api.ShardActive,
+					},
+				},
+				ConfigName: "test",
+			},
+			"col2": {
+				Shards: map[string]solr_api.SolrShardStatus{
+					"shard1": {
+						Replicas: map[string]solr_api.SolrReplicaStatus{
+							"rep-2-1-1": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-4.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-4.foo-solrcloud-headless.default:2000/solr/rep-2-1-1",
+								Leader:   false,
+								Type:     solr_api.PULL,
+							},
+							"rep-2-1-2": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-1.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-1.foo-solrcloud-headless.default:2000/solr/rep-2-1-2",
+								Leader:   false,
+								Type:     solr_api.TLOG,
+							},
+							"rep-2-1-3": {
+								State:    solr_api.ReplicaDown,
+								Core:     "core1",
+								NodeName: "pod-3.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-3.foo-solrcloud-headless.default:2000/solr/rep-2-1-3",
+								Leader:   true,
+								Type:     solr_api.TLOG,
+							},
+						},
+						State: solr_api.ShardActive,
+					},
+					"shard2": {
+						Replicas: map[string]solr_api.SolrReplicaStatus{
+							"rep-2-2-1": {
+								State:    solr_api.ReplicaDown,
+								Core:     "core1",
+								NodeName: "pod-3.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-3.foo-solrcloud-headless.default:2000/solr/rep-2-2-1",
+								Leader:   false,
+								Type:     solr_api.NRT,
+							},
+							"rep-2-2-2": {
+								State:    solr_api.ReplicaRecoveryFailed,
+								Core:     "core1",
+								NodeName: "pod-0.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-0.foo-solrcloud-headless.default:2000/solr/rep-2-2-2",
+								Leader:   false,
+								Type:     solr_api.NRT,
+							},
+							"rep-2-2-3": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-5.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-5.foo-solrcloud-headless.default:2000/solr/rep-2-2-3",
+								Leader:   true,
+								Type:     solr_api.NRT,
+							},
+							"rep-2-2-4": {
+								State:    solr_api.ReplicaActive,
+								Core:     "core1",
+								NodeName: "pod-5.foo-solrcloud-headless.default:2000_solr",
+								BaseUrl:  "pod-5.foo-solrcloud-headless.default:2000/solr/rep-2-2-4",
+								Leader:   false,
+								Type:     solr_api.NRT,
+							},
+						},
+						State: solr_api.ShardActive,
+					},
+				},
+				ConfigName: "test",
+			},
+		},
+	}
+)
