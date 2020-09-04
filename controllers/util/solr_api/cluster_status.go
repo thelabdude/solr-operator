@@ -118,7 +118,7 @@ type SolrReplicaStatus struct {
 
 	BaseUrl string `json:"base_url"`
 
-	Leader bool `json:"leader"`
+	Leader bool `json:"leader,string"`
 
 	// +optional
 	Type SolrReplicaType `json:"type"`

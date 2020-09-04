@@ -160,7 +160,15 @@ func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNod
 		} else if nodeJ.overseerLeader {
 			return true
 		}
-		return nodeI.leaders < nodeJ.leaders
+
+		if nodeI.leaders == nodeJ.leaders {
+			if nodeI.nodeName < nodeJ.nodeName {
+				return false // sort largest ordinal first
+			}
+			return true
+		} else {
+			return nodeI.leaders < nodeJ.leaders
+		}
 	})
 }
 

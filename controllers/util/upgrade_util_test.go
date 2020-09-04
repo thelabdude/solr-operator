@@ -108,7 +108,7 @@ func TestPickPodsToUpgrade(t *testing.T) {
 
 	// Normal inputs
 	podsToUpgrade = getPodNames(pickPodsToUpgrade(solrCloud, halfPods, testHealthyClusterStatus, overseerLeader, 6, 1, 0))
-	assert.ElementsMatch(t, []string{"pod-1"}, podsToUpgrade, "Incorrect set of next pods to upgrade. Do to replica placement, only the node with the least leaders can be upgraded.")
+	assert.ElementsMatch(t, []string{"pod-5"}, podsToUpgrade, "Incorrect set of next pods to upgrade. Do to replica placement, only the node with the least leaders can be upgraded.")
 
 	// Test the maxShardReplicasDownSpec
 	podsToUpgrade = getPodNames(pickPodsToUpgrade(solrCloud, halfPods, testHealthyClusterStatus, overseerLeader, 6, 2, 0))
@@ -202,7 +202,7 @@ func TestPodUpgradeOrdering(t *testing.T) {
 		},
 	}
 
-	expectedOrdering := []string{"pod-2", "pod-3", "pod-5", "pod-1", "pod-4", "pod-0"}
+	expectedOrdering := []string{"pod-2", "pod-5", "pod-3", "pod-1", "pod-4", "pod-0"}
 
 	sortNodePodsBySafety(pods, nodeMap, solrCloud)
 	foundOrdering := make([]string, len(pods))
