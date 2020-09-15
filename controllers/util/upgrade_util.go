@@ -21,9 +21,14 @@ import (
 	solr "github.com/bloomberg/solr-operator/api/v1beta1"
 	"github.com/bloomberg/solr-operator/controllers/util/solr_api"
 	corev1 "k8s.io/api/core/v1"
-	"math"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"net/url"
 	"sort"
+)
+
+const (
+	DefaultMaxPodsUnavailable          = "25%"
+	DefaultMaxShardReplicasUnavailable = 1
 )
 
 // DeterminePodsSafeToUpgrade takes a list of solr Pods and returns a list of pods that are safe to upgrade now.
@@ -33,55 +38,65 @@ import (
 //  - If the replica in the shard is not active should it matter?
 //  - Think about caching this for ~250 ms? Not a huge need to send these requests milliseconds apart.
 //    - Might be too much complexity for very little gain.
-//  - Probably want to give options for upgrade
-//    - Controlled: Managed by the Solr Operator
-//      - maxShardReplicasDown (defaults to 1)
-//		- maxBatchNodeUpgrade (<=0 is unlimited, 0-1 is a percentage of total nodes, >1 is a hard number)
-//    - Manual: Managed by the users deleting their own pods.
-func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, totalPods int, readyPods int) (podsToUpgrade []corev1.Pod, err error) {
-	queryParams := url.Values{}
-	queryParams.Add("action", "CLUSTERSTATUS")
-	clusterResp := &solr_api.SolrClusterStatusResponse{}
-	overseerResp := &solr_api.SolrOverseerStatusResponse{}
+//  - Change Prints to logs
+func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, totalPods int, readyPods int, unavailableUpToDatePods int) (podsToUpgrade []corev1.Pod, err error) {
+	// Before fetching the cluster state, be sure that there is room to update at least 1 pod
+	maxPodsUnavailable, maxPodsToUpdate := calculateMaxPodsToUpdate(cloud, totalPods, unavailableUpToDatePods)
+	if maxPodsToUpdate <= 0 {
+		log.Info("Pod update selection aborted. The number of updated pods unavailable equals or exceeds the calculated maxPodsUnavailable.", "unavailableUpdatedPods", unavailableUpToDatePods, "maxPodsUnavailable", maxPodsUnavailable)
+	} else {
+		queryParams := url.Values{}
+		queryParams.Add("action", "CLUSTERSTATUS")
+		clusterResp := &solr_api.SolrClusterStatusResponse{}
+		overseerResp := &solr_api.SolrOverseerStatusResponse{}
 
-	// TODO: Make these configurable?
-	maxShardReplicasDown := 1.0
-	maxBatchNodeUpgradeSpec := .5
-
-	if readyPods > 0 {
-		err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, clusterResp)
-		if err == nil {
-			if hasError, apiErr := solr_api.CheckForCollectionsApiError("CLUSTERSTATUS", clusterResp.ResponseHeader); hasError {
-				err = apiErr
-			} else {
-				queryParams.Set("action", "OVERSEERSTATUS")
-				err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, overseerResp)
-				if hasError, apiErr := solr_api.CheckForCollectionsApiError("OVERSEERSTATUS", clusterResp.ResponseHeader); hasError {
+		if readyPods > 0 {
+			err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, clusterResp)
+			if err == nil {
+				if hasError, apiErr := solr_api.CheckForCollectionsApiError("CLUSTERSTATUS", clusterResp.ResponseHeader); hasError {
 					err = apiErr
+				} else {
+					queryParams.Set("action", "OVERSEERSTATUS")
+					err = solr_api.CallCollectionsApi(cloud.Name, cloud.Namespace, queryParams, overseerResp)
+					if hasError, apiErr := solr_api.CheckForCollectionsApiError("OVERSEERSTATUS", clusterResp.ResponseHeader); hasError {
+						err = apiErr
+					}
 				}
 			}
 		}
-	}
-	if err != nil {
-		log.Error(err, "Error retrieving cluster status", "namespace", cloud.Namespace, "cloud", cloud.Name)
-	} else {
-		podsToUpgrade = pickPodsToUpgrade(cloud, outOfDatePods, clusterResp.ClusterStatus, overseerResp.Leader, totalPods, maxShardReplicasDown, maxBatchNodeUpgradeSpec)
+		if err != nil {
+			log.Error(err, "Error retrieving cluster status, aborting pod update selection", "namespace", cloud.Namespace, "cloud", cloud.Name)
+		} else {
+			log.Info("Pod update selection started.", "outOfDatePods", len(outOfDatePods), "maxPodsUnavailable", maxPodsUnavailable, "unavailableUpdatedPods", unavailableUpToDatePods, "maxPodsToUpdate", maxPodsToUpdate)
+			podsToUpgrade = pickPodsToUpgrade(cloud, outOfDatePods, clusterResp.ClusterStatus, overseerResp.Leader, totalPods, maxPodsToUpdate)
+		}
 	}
 	return podsToUpgrade, err
 }
 
+// calculateMaxPodsToUpdate determines the maximum number of additional pods that can be updated.
+func calculateMaxPodsToUpdate(cloud *solr.SolrCloud, totalPods int, unavailableUpToDatePods int) (maxPodsUnavailable int, maxPodsToUpdate int) {
+	// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
+	maxPodsUnavailable, _ = ResolveMaxPodsUnavailable(cloud.Spec.UpdateStrategy.ManagedUpdateOptions.MaxPodsUnavailable, totalPods)
+	return maxPodsUnavailable, maxPodsUnavailable - unavailableUpToDatePods
+}
+
 func pickPodsToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, clusterStatus solr_api.SolrClusterStatus,
-	overseer string, totalPods int, maxShardReplicasDownSpec float64, maxBatchNodeUpgradeSpec float64) (podsToUpgrade []corev1.Pod) {
+	overseer string, totalPods int, maxPodsToUpdate int) (podsToUpdate []corev1.Pod) {
 
 	nodeContents, totalShardReplicas, shardReplicasNotActive := findSolrNodeContents(clusterStatus, overseer)
 	sortNodePodsBySafety(outOfDatePods, nodeContents, cloud)
 
-	// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
-	maxBatchNodeUpgrade := int(maxBatchNodeUpgradeSpec)
-	if maxBatchNodeUpgradeSpec > 0 && maxBatchNodeUpgradeSpec < 1 {
-		maxBatchNodeUpgrade = int(math.Ceil(maxBatchNodeUpgradeSpec * float64(totalPods)))
+	updateOptions := cloud.Spec.UpdateStrategy.ManagedUpdateOptions
+	var maxShardReplicasUnavailableCache map[string]int
+	// In case the user wants all shardReplicas to be unavailable at the same time, populate the cache with the total number of replicas per shard.
+	if updateOptions.MaxShardReplicasUnavailable.Type == intstr.Int && updateOptions.MaxShardReplicasUnavailable.IntVal <= int32(0) {
+		maxShardReplicasUnavailableCache = totalShardReplicas
+	} else {
+		maxShardReplicasUnavailableCache = make(map[string]int, len(totalShardReplicas))
 	}
 
+	// TODO: Check to see if any of the podsToUpgrade are down. If so go ahead and update them? (Need to think more on this)
 	for _, pod := range outOfDatePods {
 		isSafe := true
 		nodeName := SolrNodeName(cloud, pod)
@@ -116,11 +131,9 @@ func pickPodsToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, cluste
 				// We have to allow killing of Pods that have multiple replicas of a shard
 				// Therefore only check the additional Replica count if some replicas of that shard are already being upgraded
 				// Also we only want to check the addition of the active replicas, as the non-active replicas are already included in the check.
-				// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
-				maxShardReplicasDown := int(maxShardReplicasDownSpec)
-				if maxShardReplicasDownSpec > 0 && maxShardReplicasDownSpec < 1 {
-					maxShardReplicasDown = int(math.Floor(maxShardReplicasDownSpec * float64(totalShardReplicas[shard])))
-				}
+				// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes
+				maxShardReplicasDown, _ := ResolveMaxShardReplicasUnavailable(updateOptions.MaxShardReplicasUnavailable, shard, totalShardReplicas, maxShardReplicasUnavailableCache)
+
 				if notActiveReplicaCount > 0 && notActiveReplicaCount+nodeContent.activeReplicasPerShard[shard] > maxShardReplicasDown {
 					fmt.Printf("%s: Saved. Reason - shard %s already has %d replicas not active, taking down %d more would put it over the maximum allowed down: %d\n", pod.Name, shard, notActiveReplicaCount, nodeContent.activeReplicasPerShard[shard], maxShardReplicasDown)
 					isSafe = false
@@ -135,19 +148,21 @@ func pickPodsToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, cluste
 			for shard, additionalReplicaCount := range nodeContent.activeReplicasPerShard {
 				shardReplicasNotActive[shard] += additionalReplicaCount
 			}
-			podsToUpgrade = append(podsToUpgrade, pod)
+			podsToUpdate = append(podsToUpdate, pod)
 
-			// Stop after the maxBatchNodeUpgrade count, if one is provided.
-			if maxBatchNodeUpgrade >= 1 && len(podsToUpgrade) >= maxBatchNodeUpgrade {
+			// Stop after the maxBatchNodeUpdate count, if one is provided.
+			if maxPodsToUpdate >= 1 && len(podsToUpdate) >= maxPodsToUpdate {
+				log.Info("Pod update selection complete. Maximum number of pods able to be updated reached.", "cloud", cloud.Name, "namespace", cloud.Namespace, "maxPodsToUpdate", maxPodsToUpdate)
 				break
 			}
 		}
 	}
-	return podsToUpgrade
+	return podsToUpdate
 }
 
 func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNodeContents, solrCloud *solr.SolrCloud) {
 	sort.SliceStable(outOfDatePods, func(i, j int) bool {
+		// First sort by if the node is in the ClusterState
 		nodeI, hasNodeI := nodeMap[SolrNodeName(solrCloud, outOfDatePods[i])]
 		if !hasNodeI {
 			return true
@@ -161,15 +176,53 @@ func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNod
 			return true
 		}
 
-		if nodeI.leaders == nodeJ.leaders {
-			if nodeI.nodeName < nodeJ.nodeName {
-				return false // sort largest ordinal first
-			}
-			return true
-		} else {
+		// If both nodes are in the ClusterState and not overseerLeader, then prioritize the one with less leaders.
+		if nodeI.leaders != nodeJ.leaders {
 			return nodeI.leaders < nodeJ.leaders
 		}
+
+		// Lastly break any ties by a comparison of the name
+		return nodeI.nodeName > nodeJ.nodeName
 	})
+}
+
+// ResolveMaxPodsUnavailable resolves the maximum number of pods that are allowed to be unavailable, when choosing pods to update.
+func ResolveMaxPodsUnavailable(maxPodsUnavailable *intstr.IntOrString, desiredPods int) (int, error) {
+	if maxPodsUnavailable.Type == intstr.Int && maxPodsUnavailable.IntVal <= int32(0) {
+		return desiredPods, nil
+	}
+	podsUnavailable, err := intstr.GetValueFromIntOrPercent(intstr.ValueOrDefault(maxPodsUnavailable, intstr.FromString(DefaultMaxPodsUnavailable)), desiredPods, false)
+	if err != nil {
+		return 1, err
+	}
+
+	if podsUnavailable == 0 {
+		// podsUnavailable can never be 0, otherwise pods would never be able to be upgraded.
+		podsUnavailable = 1
+	}
+
+	return podsUnavailable, nil
+}
+
+// ResolveMaxShardReplicasUnavailable resolves the maximum number of replicas that are allowed to be unavailable for a given shard, when choosing pods to update.
+func ResolveMaxShardReplicasUnavailable(maxShardReplicasUnavailable *intstr.IntOrString, shard string, totalShardReplicas map[string]int, cache map[string]int) (int, error) {
+	maxUnavailable, isCached := cache[shard]
+	var err error
+	if !isCached {
+		maxUnavailable, err = intstr.GetValueFromIntOrPercent(intstr.ValueOrDefault(maxShardReplicasUnavailable, intstr.FromInt(DefaultMaxShardReplicasUnavailable)), totalShardReplicas[shard], false)
+		if err != nil {
+			maxUnavailable = 1
+		}
+	} else {
+		err = nil
+	}
+
+	if maxUnavailable == 0 {
+		// podsUnavailable can never be 0, otherwise pods would never be able to be upgraded.
+		maxUnavailable = 1
+	}
+
+	return maxUnavailable, nil
 }
 
 /*

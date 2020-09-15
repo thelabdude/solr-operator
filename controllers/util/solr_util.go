@@ -236,6 +236,13 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 		envVars = append(envVars, customPodOptions.EnvVariables...)
 	}
 
+	// Decide which update strategy to use
+	updateStrategy := appsv1.OnDeleteStatefulSetStrategyType
+	if solrCloud.Spec.UpdateStrategy.Method == solr.StatefulSetUpdate {
+		// Only use the rolling update strategy if the StatefulSetUpdate method is specified.
+		updateStrategy = appsv1.RollingUpdateStatefulSetStrategyType
+	}
+
 	// Create the Stateful Set
 	stateful := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -252,7 +259,7 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 			Replicas:            solrCloud.Spec.Replicas,
 			PodManagementPolicy: appsv1.ParallelPodManagement,
 			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
-				Type: appsv1.OnDeleteStatefulSetStrategyType,
+				Type: updateStrategy,
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
