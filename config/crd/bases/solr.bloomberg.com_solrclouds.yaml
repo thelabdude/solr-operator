@@ -4848,6 +4848,43 @@ spec:
                       type: object
                   type: object
               type: object
+            updateStrategy:
+              description: Define how Solr rolling updates are executed.
+              properties:
+                managed:
+                  description: Options for Solr Operator Managed rolling updates.
+                  properties:
+                    maxPodsUnavailable:
+                      anyOf:
+                      - type: string
+                      - type: integer
+                      description: "The maximum number of pods that can be unavailable
+                        during the update. Value can be an absolute number (ex: 5)
+                        or a percentage of the desired number of pods (ex: 10%). Absolute
+                        number is calculated from percentage by rounding down. If
+                        the provided number is 0 or negative, then all pods will be
+                        allowed to be updated in unison. \n Defaults to 25%."
+                    maxShardReplicasUnavailable:
+                      anyOf:
+                      - type: string
+                      - type: integer
+                      description: "The maximum number of replicas for each shard
+                        that can be unavailable during the update. Value can be an
+                        absolute number (ex: 5) or a percentage of replicas in a shard
+                        (ex: 25%). Absolute number is calculated from percentage by
+                        rounding down. If the provided number is 0 or negative, then
+                        all replicas will be allowed to be updated in unison. \n Defaults
+                        to 1."
+                  type: object
+                method:
+                  description: Method defines the way in which SolrClouds should be
+                    updated when the podSpec changes.
+                  enum:
+                  - Managed
+                  - StatefulSet
+                  - Manual
+                  type: string
+              type: object
             zookeeperRef:
               description: The information for the Zookeeper this SolrCloud should
                 connect to Can be a zookeeper that is running, or one that is created

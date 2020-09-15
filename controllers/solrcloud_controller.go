@@ -262,21 +262,24 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 	}
 
-	outOfDatePods, err := reconcileCloudStatus(r, instance, &newStatus, statefulSetStatus)
+	outOfDatePods, unavailableUpdatedPodCount, err := reconcileCloudStatus(r, instance, &newStatus, statefulSetStatus)
 	if err != nil {
 		return requeueOrNot, err
 	}
 
-	// Throw away the error because it will only happen because all pods are down and the pod statuses haven't been updated, causing a Http Exception.
-	podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, int(newStatus.Replicas), int(newStatus.ReadyReplicas))
-	if err != nil {
-		return requeueOrNot, err
-	}
-	for _, pod := range podsToUpgrade {
-		r.Log.Info("Killing solr pod for upgrade", "pod", pod.Name, "namespace", instance.Namespace, "name", instance.Name)
-		r.Delete(context.Background(), &pod, client.Preconditions{
-			UID: &pod.UID,
-		})
+	// Manage the updating of out-of-spec pods, if the Managed UpdateStrategy has been specified.
+	if instance.Spec.UpdateStrategy.Method == solr.ManagedUpdate {
+		// Throw away the error because it will only happen because all pods are down and the pod statuses haven't been updated, causing a Http Exception.
+		podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, int(newStatus.Replicas), int(newStatus.ReadyReplicas), unavailableUpdatedPodCount)
+		if err != nil {
+			return requeueOrNot, err
+		}
+		for _, pod := range podsToUpgrade {
+			r.Log.Info("Killing solr pod for upgrade", "pod", pod.Name, "namespace", instance.Namespace, "name", instance.Name)
+			r.Delete(context.Background(), &pod, client.Preconditions{
+				UID: &pod.UID,
+			})
+		}
 	}
 
 	extAddressabilityOpts := instance.Spec.SolrAddressability.External
@@ -315,7 +318,7 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	return requeueOrNot, nil
 }
 
-func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, newStatus *solr.SolrCloudStatus, statefulSetStatus appsv1.StatefulSetStatus) (outOfDatePods []corev1.Pod, err error) {
+func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, newStatus *solr.SolrCloudStatus, statefulSetStatus appsv1.StatefulSetStatus) (outOfDatePods []corev1.Pod, unavailableUpdatedPodCount int, err error) {
 	foundPods := &corev1.PodList{}
 	selectorLabels := solrCloud.SharedLabels()
 	selectorLabels["technology"] = solr.SolrTechnologyLabel
@@ -328,7 +331,7 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 
 	err = r.List(context.TODO(), foundPods, listOps)
 	if err != nil {
-		return outOfDatePods, err
+		return outOfDatePods, unavailableUpdatedPodCount, err
 	}
 
 	var otherVersions []string
@@ -338,11 +341,6 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 
 	updateRevision := statefulSetStatus.UpdateRevision
 	for idx, p := range foundPods.Items {
-		// A pod is out of date if it's revision label is not equal to the statefulSetStatus' updateRevision.
-		if p.Labels["controller-revision-hash"] != updateRevision {
-			outOfDatePods = append(outOfDatePods, p)
-		}
-
 		nodeNames[idx] = p.Name
 		nodeStatus := solr.SolrNodeStatus{}
 		nodeStatus.Name = p.Name
@@ -377,6 +375,14 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 				}
 			}
 		}
+
+		// A pod is out of date if it's revision label is not equal to the statefulSetStatus' updateRevision.
+		if p.Labels["controller-revision-hash"] != updateRevision {
+			outOfDatePods = append(outOfDatePods, p)
+		} else if !nodeStatus.Ready {
+			// If the pod is not out-of-date and is unavailable, increase the counter
+			unavailableUpdatedPodCount += 1
+		}
 	}
 	sort.Strings(nodeNames)
 
@@ -404,7 +410,7 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 		newStatus.ExternalCommonAddress = &extAddress
 	}
 
-	return outOfDatePods, nil
+	return outOfDatePods, unavailableUpdatedPodCount, nil
 }
 
 func reconcileNodeService(r *SolrCloudReconciler, instance *solr.SolrCloud, nodeName string) (err error, ip string) {
