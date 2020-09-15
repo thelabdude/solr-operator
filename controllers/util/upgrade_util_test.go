@@ -22,23 +22,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"testing"
 )
 
-var (
-	expectedBackupRequest = reconcile.Request{NamespacedName: types.NamespacedName{Name: "foo-back", Namespace: "default"}}
-)
-
-func init() {
-}
-
 func TestPickPodsToUpgrade(t *testing.T) {
-	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 	overseerLeader := "pod-0.foo-solrcloud-headless.default:2000_solr"
 
 	maxshardReplicasUnavailable := intstr.FromInt(1)
