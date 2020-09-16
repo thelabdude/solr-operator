@@ -184,28 +184,28 @@ func TestPodUpgradeOrdering(t *testing.T) {
 		SolrNodeName(solrCloud, pods[0]): {
 			nodeName:       SolrNodeName(solrCloud, pods[0]),
 			leaders:        4,
-			replicas: 		10,
+			replicas:       10,
 			overseerLeader: true,
 			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[1]): {
 			nodeName:       SolrNodeName(solrCloud, pods[1]),
 			leaders:        8,
-			replicas: 		20,
+			replicas:       20,
 			overseerLeader: false,
 			live:           false,
 		},
 		SolrNodeName(solrCloud, pods[2]): {
 			nodeName:       SolrNodeName(solrCloud, pods[2]),
 			leaders:        0,
-			replicas: 		16,
+			replicas:       16,
 			overseerLeader: false,
 			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[3]): {
 			nodeName:       SolrNodeName(solrCloud, pods[3]),
 			leaders:        3,
-			replicas: 		10,
+			replicas:       10,
 			overseerLeader: false,
 			live:           true,
 		},
@@ -213,7 +213,7 @@ func TestPodUpgradeOrdering(t *testing.T) {
 		SolrNodeName(solrCloud, pods[4]): {
 			nodeName:       SolrNodeName(solrCloud, pods[4]),
 			leaders:        10,
-			replicas: 		10,
+			replicas:       10,
 			overseerLeader: false,
 			live:           true,
 		},
@@ -221,28 +221,28 @@ func TestPodUpgradeOrdering(t *testing.T) {
 		SolrNodeName(solrCloud, pods[5]): {
 			nodeName:       SolrNodeName(solrCloud, pods[5]),
 			leaders:        3,
-			replicas: 		12,
+			replicas:       12,
 			overseerLeader: false,
 			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[6]): {
 			nodeName:       SolrNodeName(solrCloud, pods[6]),
 			leaders:        3,
-			replicas: 		12,
+			replicas:       12,
 			overseerLeader: false,
 			live:           false,
 		},
 		SolrNodeName(solrCloud, pods[7]): {
 			nodeName:       SolrNodeName(solrCloud, pods[7]),
 			leaders:        3,
-			replicas: 		12,
+			replicas:       12,
 			overseerLeader: false,
 			live:           true,
 		},
 		SolrNodeName(solrCloud, pods[8]): {
 			nodeName:       SolrNodeName(solrCloud, pods[8]),
 			leaders:        3,
-			replicas: 		12,
+			replicas:       12,
 			overseerLeader: false,
 			live:           true,
 		},
@@ -266,8 +266,8 @@ func TestFindSolrNodeContents(t *testing.T) {
 	expectedNodeContents := map[string]SolrNodeContents{
 		"pod-0.foo-solrcloud-headless.default:2000_solr": {
 			nodeName: "pod-0.foo-solrcloud-headless.default:2000_solr",
-			leaders:   0,
-			replicas:  2,
+			leaders:  0,
+			replicas: 2,
 			totalReplicasPerShard: map[string]int{
 				"col1|shard1": 1,
 				"col2|shard2": 1,
@@ -283,8 +283,8 @@ func TestFindSolrNodeContents(t *testing.T) {
 		},
 		"pod-1.foo-solrcloud-headless.default:2000_solr": {
 			nodeName: "pod-1.foo-solrcloud-headless.default:2000_solr",
-			leaders:   1,
-			replicas:  2,
+			leaders:  1,
+			replicas: 2,
 			totalReplicasPerShard: map[string]int{
 				"col1|shard2": 1,
 				"col2|shard1": 1,
@@ -299,8 +299,8 @@ func TestFindSolrNodeContents(t *testing.T) {
 		},
 		"pod-2.foo-solrcloud-headless.default:2000_solr": {
 			nodeName: "pod-2.foo-solrcloud-headless.default:2000_solr",
-			leaders:   0,
-			replicas:  2,
+			leaders:  0,
+			replicas: 2,
 			totalReplicasPerShard: map[string]int{
 				"col1|shard1": 1,
 				"col1|shard2": 1,
@@ -314,8 +314,8 @@ func TestFindSolrNodeContents(t *testing.T) {
 		},
 		"pod-3.foo-solrcloud-headless.default:2000_solr": {
 			nodeName: "pod-3.foo-solrcloud-headless.default:2000_solr",
-			leaders:   2,
-			replicas:  3,
+			leaders:  2,
+			replicas: 3,
 			totalReplicasPerShard: map[string]int{
 				"col1|shard1": 1,
 				"col2|shard1": 1,
@@ -333,8 +333,8 @@ func TestFindSolrNodeContents(t *testing.T) {
 		},
 		"pod-4.foo-solrcloud-headless.default:2000_solr": {
 			nodeName: "pod-4.foo-solrcloud-headless.default:2000_solr",
-			leaders:   0,
-			replicas:  1,
+			leaders:  0,
+			replicas: 1,
 			totalReplicasPerShard: map[string]int{
 				"col2|shard1": 1,
 			},
@@ -345,8 +345,8 @@ func TestFindSolrNodeContents(t *testing.T) {
 		},
 		"pod-5.foo-solrcloud-headless.default:2000_solr": {
 			nodeName: "pod-5.foo-solrcloud-headless.default:2000_solr",
-			leaders:   1,
-			replicas:  3,
+			leaders:  1,
+			replicas: 3,
 			totalReplicasPerShard: map[string]int{
 				"col1|shard2": 1,
 				"col2|shard2": 2,
