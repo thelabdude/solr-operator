@@ -183,6 +183,16 @@ func sortNodePodsBySafety(outOfDatePods []corev1.Pod, nodeMap map[string]SolrNod
 			return nodeI.leaders < nodeJ.leaders
 		}
 
+		// If the nodes have the same number of leaders, then prioritize by the number of replicas.
+		if nodeI.replicas != nodeJ.replicas {
+			return nodeI.replicas < nodeJ.replicas
+		}
+
+		// If the nodes have the same number of replicas, then prioritize if one node is not live.
+		if nodeI.live != nodeJ.live {
+			return !nodeI.live
+		}
+
 		// Lastly break any ties by a comparison of the name
 		return nodeI.nodeName > nodeJ.nodeName
 	})
@@ -244,6 +254,7 @@ func findSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 			contents = SolrNodeContents{
 				nodeName:               nodeName,
 				leaders:                0,
+				replicas:               0,
 				totalReplicasPerShard:  map[string]int{},
 				activeReplicasPerShard: map[string]int{},
 				downReplicasPerShard:   map[string]int{},
@@ -266,6 +277,7 @@ func findSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 					contents = SolrNodeContents{
 						nodeName:               replica.NodeName,
 						leaders:                0,
+						replicas:               0,
 						totalReplicasPerShard:  map[string]int{},
 						activeReplicasPerShard: map[string]int{},
 						downReplicasPerShard:   map[string]int{},
@@ -276,6 +288,7 @@ func findSolrNodeContents(cluster solr_api.SolrClusterStatus, overseerLeader str
 				if replica.Leader {
 					contents.leaders += 1
 				}
+				contents.replicas += 1
 				contents.totalReplicasPerShard[uniqueShard] += 1
 
 				// A shard can be considered "not active" if it's state is not "active" or the node it lives in is not "live".
@@ -320,6 +333,9 @@ type SolrNodeContents struct {
 
 	// The number of leader replicas that reside in this Solr Node
 	leaders int
+
+	// The number of replicas that reside in this Solr Node
+	replicas int
 
 	// The number of total replicas in this Solr Node, grouped by each unique shard (collection+shard)
 	totalReplicasPerShard map[string]int
