@@ -7,7 +7,6 @@ require (
 	github.com/docker/spdystream v0.0.0-20181023171402-6480d4af844c // indirect
 	github.com/elazarl/goproxy v0.0.0-20191011121108-aa519ddbe484 // indirect
 	github.com/go-logr/logr v0.1.0
-	github.com/onsi/ginkgo v1.12.0
 	github.com/onsi/gomega v1.9.0
 	github.com/pravega/zookeeper-operator v0.2.6
 	github.com/samuel/go-zookeeper v0.0.0-20190923202752-2cc03de413da
