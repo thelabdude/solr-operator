@@ -262,15 +262,16 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 	}
 
-	outOfDatePods, unavailableUpdatedPodCount, err := reconcileCloudStatus(r, instance, &newStatus, statefulSetStatus)
+	outOfDatePods, availableUpdatedPodCount, err := reconcileCloudStatus(r, instance, &newStatus, statefulSetStatus)
 	if err != nil {
 		return requeueOrNot, err
 	}
 
 	// Manage the updating of out-of-spec pods, if the Managed UpdateStrategy has been specified.
 	if instance.Spec.UpdateStrategy.Method == solr.ManagedUpdate {
+		totalReplicas := int(newStatus.Replicas)
 		// Throw away the error because it will only happen because all pods are down and the pod statuses haven't been updated, causing a Http Exception.
-		podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, int(newStatus.Replicas), int(newStatus.ReadyReplicas), unavailableUpdatedPodCount)
+		podsToUpgrade, _ := util.DeterminePodsSafeToUpgrade(instance, outOfDatePods, totalReplicas, int(newStatus.ReadyReplicas), availableUpdatedPodCount)
 		if err != nil {
 			return requeueOrNot, err
 		}
@@ -318,7 +319,7 @@ func (r *SolrCloudReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	return requeueOrNot, nil
 }
 
-func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, newStatus *solr.SolrCloudStatus, statefulSetStatus appsv1.StatefulSetStatus) (outOfDatePods []corev1.Pod, unavailableUpdatedPodCount int, err error) {
+func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, newStatus *solr.SolrCloudStatus, statefulSetStatus appsv1.StatefulSetStatus) (outOfDatePods []corev1.Pod, availableUpdatedPodCount int, err error) {
 	foundPods := &corev1.PodList{}
 	selectorLabels := solrCloud.SharedLabels()
 	selectorLabels["technology"] = solr.SolrTechnologyLabel
@@ -331,7 +332,7 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 
 	err = r.List(context.TODO(), foundPods, listOps)
 	if err != nil {
-		return outOfDatePods, unavailableUpdatedPodCount, err
+		return outOfDatePods, availableUpdatedPodCount, err
 	}
 
 	var otherVersions []string
@@ -379,9 +380,9 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 		// A pod is out of date if it's revision label is not equal to the statefulSetStatus' updateRevision.
 		if p.Labels["controller-revision-hash"] != updateRevision {
 			outOfDatePods = append(outOfDatePods, p)
-		} else if !nodeStatus.Ready {
+		} else if nodeStatus.Ready {
 			// If the pod is not out-of-date and is unavailable, increase the counter
-			unavailableUpdatedPodCount += 1
+			availableUpdatedPodCount += 1
 		}
 	}
 	sort.Strings(nodeNames)
@@ -410,7 +411,7 @@ func reconcileCloudStatus(r *SolrCloudReconciler, solrCloud *solr.SolrCloud, new
 		newStatus.ExternalCommonAddress = &extAddress
 	}
 
-	return outOfDatePods, unavailableUpdatedPodCount, nil
+	return outOfDatePods, availableUpdatedPodCount, nil
 }
 
 func reconcileNodeService(r *SolrCloudReconciler, instance *solr.SolrCloud, nodeName string) (err error, ip string) {

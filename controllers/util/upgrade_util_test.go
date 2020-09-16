@@ -365,23 +365,25 @@ func TestCalculateMaxPodsToUpgrade(t *testing.T) {
 		},
 	}
 
-	foundMaxPodsUnavailable, foundMaxPodsToUpdate := calculateMaxPodsToUpdate(solrCloud, 10, 2)
+	foundMaxPodsUnavailable, foundUnavailableUpdatedPodCount, foundMaxPodsToUpdate := calculateMaxPodsToUpdate(solrCloud, 10, 4, 4)
 	assert.Equal(t, 2, foundMaxPodsUnavailable, "Incorrect value of maxPodsUnavailable given fromInt(2)")
-	assert.Equal(t, 0, foundMaxPodsToUpdate, "Incorrect value of foundMaxPodsToUpdate")
+	assert.Equal(t, 2, foundUnavailableUpdatedPodCount, "Incorrect value of unavailableUpdatedPodCount")
+	assert.Equal(t, 0, foundMaxPodsToUpdate, "Incorrect value of maxPodsToUpdate")
 
-	foundMaxPodsUnavailable, foundMaxPodsToUpdate = calculateMaxPodsToUpdate(solrCloud, 10, 3)
+	foundMaxPodsUnavailable, foundUnavailableUpdatedPodCount, foundMaxPodsToUpdate = calculateMaxPodsToUpdate(solrCloud, 10, 4, 3)
 	assert.Equal(t, 2, foundMaxPodsUnavailable, "Incorrect value of maxPodsUnavailable given fromInt(2)")
-	assert.Equal(t, -1, foundMaxPodsToUpdate, "Incorrect value of foundMaxPodsToUpdate")
+	assert.Equal(t, 3, foundUnavailableUpdatedPodCount, "Incorrect value of unavailableUpdatedPodCount")
+	assert.Equal(t, -1, foundMaxPodsToUpdate, "Incorrect value of maxPodsToUpdate")
 
 	maxPodsUnavailable = intstr.FromString("45%")
-	foundMaxPodsUnavailable, foundMaxPodsToUpdate = calculateMaxPodsToUpdate(solrCloud, 10, 2)
-	assert.Equal(t, 4, foundMaxPodsUnavailable, "Incorrect value of maxPodsUnavailable given fromInt(2)")
-	assert.Equal(t, 2, foundMaxPodsToUpdate, "Incorrect value of foundMaxPodsToUpdate")
+	foundMaxPodsUnavailable, foundUnavailableUpdatedPodCount, foundMaxPodsToUpdate = calculateMaxPodsToUpdate(solrCloud, 10, 3, 5)
+	assert.Equal(t, 4, foundMaxPodsUnavailable, "Incorrect value of maxPodsUnavailable given fromString(\"45%\")")
+	assert.Equal(t, 2, foundMaxPodsToUpdate, "Incorrect value of maxPodsToUpdate")
 
 	maxPodsUnavailable = intstr.FromString("70%")
-	foundMaxPodsUnavailable, foundMaxPodsToUpdate = calculateMaxPodsToUpdate(solrCloud, 10, 5)
-	assert.Equal(t, 7, foundMaxPodsUnavailable, "Incorrect value of maxPodsUnavailable given fromInt(2)")
-	assert.Equal(t, 2, foundMaxPodsToUpdate, "Incorrect value of foundMaxPodsToUpdate")
+	foundMaxPodsUnavailable, foundUnavailableUpdatedPodCount, foundMaxPodsToUpdate = calculateMaxPodsToUpdate(solrCloud, 10, 3, 2)
+	assert.Equal(t, 7, foundMaxPodsUnavailable, "Incorrect value of maxPodsUnavailable given fromString(\"70%\")")
+	assert.Equal(t, 2, foundMaxPodsToUpdate, "Incorrect value of maxPodsToUpdate")
 }
 
 func TestSolrNodeName(t *testing.T) {
