@@ -39,11 +39,11 @@ const (
 //  - Think about caching this for ~250 ms? Not a huge need to send these requests milliseconds apart.
 //    - Might be too much complexity for very little gain.
 //  - Change Prints to logs
-func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, totalPods int, readyPods int, unavailableUpToDatePods int) (podsToUpgrade []corev1.Pod, err error) {
+func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, totalPods int, readyPods int, availableUpdatedPodCount int) (podsToUpgrade []corev1.Pod, err error) {
 	// Before fetching the cluster state, be sure that there is room to update at least 1 pod
-	maxPodsUnavailable, maxPodsToUpdate := calculateMaxPodsToUpdate(cloud, totalPods, unavailableUpToDatePods)
+	maxPodsUnavailable, unavailableUpdatedPodCount, maxPodsToUpdate := calculateMaxPodsToUpdate(cloud, totalPods, len(outOfDatePods), availableUpdatedPodCount)
 	if maxPodsToUpdate <= 0 {
-		log.Info("Pod update selection aborted. The number of updated pods unavailable equals or exceeds the calculated maxPodsUnavailable.", "unavailableUpdatedPods", unavailableUpToDatePods, "maxPodsUnavailable", maxPodsUnavailable)
+		log.Info("Pod update selection canceled. The number of updated pods unavailable equals or exceeds the calculated maxPodsUnavailable.", "unavailableUpdatedPods", unavailableUpdatedPodCount, "maxPodsUnavailable", maxPodsUnavailable)
 	} else {
 		queryParams := url.Values{}
 		queryParams.Add("action", "CLUSTERSTATUS")
@@ -67,7 +67,7 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 		if err != nil {
 			log.Error(err, "Error retrieving cluster status, aborting pod update selection", "namespace", cloud.Namespace, "cloud", cloud.Name)
 		} else {
-			log.Info("Pod update selection started.", "outOfDatePods", len(outOfDatePods), "maxPodsUnavailable", maxPodsUnavailable, "unavailableUpdatedPods", unavailableUpToDatePods, "maxPodsToUpdate", maxPodsToUpdate)
+			log.Info("Pod update selection started.", "outOfDatePods", len(outOfDatePods), "maxPodsUnavailable", maxPodsUnavailable, "unavailableUpdatedPods", unavailableUpdatedPodCount, "maxPodsToUpdate", maxPodsToUpdate)
 			podsToUpgrade = pickPodsToUpgrade(cloud, outOfDatePods, clusterResp.ClusterStatus, overseerResp.Leader, totalPods, maxPodsToUpdate)
 		}
 	}
@@ -75,10 +75,12 @@ func DeterminePodsSafeToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Po
 }
 
 // calculateMaxPodsToUpdate determines the maximum number of additional pods that can be updated.
-func calculateMaxPodsToUpdate(cloud *solr.SolrCloud, totalPods int, unavailableUpToDatePods int) (maxPodsUnavailable int, maxPodsToUpdate int) {
+func calculateMaxPodsToUpdate(cloud *solr.SolrCloud, totalPods int, outOfDatePodCount int, availableUpdatedPodCount int) (maxPodsUnavailable int, unavailableUpdatedPodCount int, maxPodsToUpdate int) {
+	// In order to calculate the number of updated pods that are unavailable take all pods, take the total pods and subtract those that are available and updated, and those that are not updated.
+	unavailableUpdatedPodCount = totalPods - availableUpdatedPodCount - outOfDatePodCount
 	// If the maxBatchNodeUpgradeSpec is passed as a decimal between 0 and 1, then calculate as a percentage of the number of nodes.
 	maxPodsUnavailable, _ = ResolveMaxPodsUnavailable(cloud.Spec.UpdateStrategy.ManagedUpdateOptions.MaxPodsUnavailable, totalPods)
-	return maxPodsUnavailable, maxPodsUnavailable - unavailableUpToDatePods
+	return maxPodsUnavailable, unavailableUpdatedPodCount, maxPodsUnavailable - unavailableUpdatedPodCount
 }
 
 func pickPodsToUpgrade(cloud *solr.SolrCloud, outOfDatePods []corev1.Pod, clusterStatus solr_api.SolrClusterStatus,
